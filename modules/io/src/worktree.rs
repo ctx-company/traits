@@ -31,6 +31,21 @@ pub struct PreparedWorktree {
     /// worktree (see [`RetryWarnings`]). Empty when no Git call hit
     /// classified transient lock contention.
     pub retry_warnings: Vec<String>,
+    /// The ref and commit the `ctx/run/<id>` branch was created from — see
+    /// [`resolve_worktree_base`]. `None` when resuming an already-registered
+    /// worktree: nothing was created, so there is no base to report.
+    pub base: Option<WorktreeBase>,
+}
+
+/// Where a freshly created run worktree branched from: the task's own
+/// `ctx/task/<key>` branch when the run carries a task and that branch
+/// exists, otherwise the invocation checkout's `HEAD`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorktreeBase {
+    /// `HEAD`, or the `ctx/task/<key>` branch name.
+    pub reference: String,
+    /// The commit `reference` named when the worktree was created.
+    pub sha: String,
 }
 
 /// Attempts before a Git failure [`classify_transient_lock`] recognizes is
@@ -202,6 +217,88 @@ pub fn derive_worktree_id(session_id: &str) -> String {
     format!("wt-{short}")
 }
 
+/// The task's resume branch: `ctx/task/<key>`.
+///
+/// Runs resume the task branch (0281): a task's work spans runs, so the
+/// branch a task's runs land their stage commits on outlives any one run
+/// worktree. The trait side of the convention is the implement trait's
+/// stage-commit step, which runs `git branch -f ctx/task/<task> HEAD` after
+/// every stage commit and after the final commit, so the branch always names
+/// the last committed stage. The runtime side is [`resolve_worktree_base`]
+/// (a new run for the task branches from it when it exists) and
+/// [`delete_task_branch`] (released once the task's run has merged, so a
+/// re-opened task starts from the landing branch again).
+pub fn task_branch_name(task_key: &str) -> String {
+    format!("ctx/task/{task_key}")
+}
+
+/// Resolve the ref a new run worktree branches from: the task's
+/// [`task_branch_name`] when `task_key` is given and that branch exists,
+/// otherwise `HEAD`. The commit is captured alongside the ref so the ledger
+/// records exactly what the worktree started from.
+pub fn resolve_worktree_base(
+    repo_root: &Utf8Path,
+    task_key: Option<&str>,
+) -> crate::Result<WorktreeBase> {
+    if let Some(task_key) = task_key {
+        let branch = task_branch_name(task_key);
+        if let Some(sha) = local_branch_tip(repo_root, &branch)? {
+            return Ok(WorktreeBase {
+                reference: branch,
+                sha,
+            });
+        }
+    }
+    let output = run_git(repo_root, &["rev-parse", "--verify", "HEAD"])?;
+    if !output.success {
+        return Err(git_error("git rev-parse --verify HEAD", &output));
+    }
+    Ok(WorktreeBase {
+        reference: "HEAD".to_string(),
+        sha: output.stdout.trim().to_string(),
+    })
+}
+
+/// The commit a local branch names, or `None` when no such branch exists.
+fn local_branch_tip(repo_root: &Utf8Path, branch: &str) -> crate::Result<Option<String>> {
+    let reference = format!("refs/heads/{branch}");
+    let output = run_git(
+        repo_root,
+        &["rev-parse", "--verify", "--quiet", reference.as_str()],
+    )?;
+    Ok(output
+        .success
+        .then(|| output.stdout.trim().to_string())
+        .filter(|sha| !sha.is_empty()))
+}
+
+/// Release the task's resume branch after its work landed: deletes
+/// `ctx/task/<key>` and returns the deleted branch name, or `Ok(None)` when
+/// no such branch exists (a task whose runs never committed a stage). Forced
+/// (`-D`): a reconciled landing rebases the run's commits, so the task branch
+/// is not necessarily an ancestor of the landing branch even though every
+/// change it holds has landed.
+pub fn delete_task_branch(
+    repo_root: &Utf8Path,
+    task_key: &str,
+    warnings: &mut RetryWarnings,
+) -> crate::Result<Option<String>> {
+    let branch = task_branch_name(task_key);
+    if local_branch_tip(repo_root, &branch)?.is_none() {
+        return Ok(None);
+    }
+    let output = run_git_retrying(
+        repo_root,
+        &["branch", "-D", branch.as_str()],
+        "task-branch-delete",
+        warnings,
+    )?;
+    if !output.success {
+        return Err(git_error("git branch -D", &output));
+    }
+    Ok(Some(branch))
+}
+
 /// Create the dedicated worktree for `id`, seeding the declared gitignored
 /// context roots. Fails if `id` is already a registered worktree: a fresh
 /// `run`/`session start` must never execute inside a checkout another
@@ -227,6 +324,10 @@ pub struct PrepareOptions<'a> {
     /// Typed startup-only notification emitted before each configured warm
     /// path is validated. It is separate from the stable text narrator.
     pub warm_validation: Option<&'a dyn Fn(&str)>,
+    /// The task this run is dispatched for, when any: its `ctx/task/<key>`
+    /// branch is the worktree's base when it exists (see
+    /// [`resolve_worktree_base`]). `None` branches from `HEAD`.
+    pub task_key: Option<&'a str>,
 }
 
 pub fn prepare_worktree(
@@ -242,6 +343,7 @@ pub fn prepare_worktree(
         worktree_add_timeout_ms,
         progress,
         warm_validation,
+        task_key,
     } = options;
     let (repo_root, path, branch) = resolve_worktree_location(id)?;
     let mut warnings = RetryWarnings::new();
@@ -253,10 +355,14 @@ pub fn prepare_worktree(
             ),
         ));
     }
+    let base = resolve_worktree_base(&repo_root, task_key)?;
     create_new_worktree(
         &repo_root,
         &path,
-        &branch,
+        WorktreeCheckout {
+            branch: &branch,
+            base: &base,
+        },
         contents,
         SetupPlan {
             setup,
@@ -329,6 +435,7 @@ pub fn resume_or_prepare_worktree(
                 resumed: true,
                 seed_snapshots: Vec::new(),
                 retry_warnings: warnings.into_vec(),
+                base: None,
             });
         }
         return Err(config_error(
@@ -338,10 +445,17 @@ pub fn resume_or_prepare_worktree(
             ),
         ));
     }
+    // A standalone `drive` creating the worktree late has no task binding
+    // in hand; a run started through `run::start` resolves its task branch
+    // in `prepare_worktree`. This path branches from `HEAD`.
+    let base = resolve_worktree_base(&repo_root, None)?;
     create_new_worktree(
         &repo_root,
         &path,
-        &branch,
+        WorktreeCheckout {
+            branch: &branch,
+            base: &base,
+        },
         contents,
         SetupPlan {
             setup,
@@ -2013,10 +2127,21 @@ struct SetupPlan<'a> {
     warm_validation: Option<&'a dyn Fn(&str)>,
 }
 
+/// The branch a fresh worktree checks out and the ref it is created from —
+/// bundled for the same reason as [`SetupBudget`]: the base joined the
+/// parameter list when runs learned to resume the task branch, and one
+/// argument keeps [`create_new_worktree`] under clippy's argument-count
+/// ceiling without a new `#[allow]`.
+#[derive(Debug, Clone, Copy)]
+struct WorktreeCheckout<'a> {
+    branch: &'a str,
+    base: &'a WorktreeBase,
+}
+
 fn create_new_worktree(
     repo_root: &Utf8Path,
     path: &Utf8Path,
-    branch: &str,
+    checkout: WorktreeCheckout<'_>,
     contents: WorktreeContents<'_>,
     setup_plan: SetupPlan<'_>,
     worktree_add_timeout_ms: u64,
@@ -2042,7 +2167,15 @@ fn create_new_worktree(
     // already invisible to `git status` / `git add -A` before any seed,
     // setup, or trait step can run git inside the new worktree.
     crate::gitignore::ensure_runtime_exclude(repo_root)?;
-    create_worktree(repo_root, path, branch, worktree_add_timeout_ms, warnings)?;
+    let WorktreeCheckout { branch, base } = checkout;
+    create_worktree(
+        repo_root,
+        path,
+        branch,
+        &base.reference,
+        worktree_add_timeout_ms,
+        warnings,
+    )?;
     // Private baseline directory under this worktree's own Git administrative
     // directory (never visible as working-tree content, never serialized into
     // the run ledger), resolved before any seed is copied so every seed's
@@ -2106,6 +2239,7 @@ fn create_new_worktree(
         resumed: false,
         seed_snapshots,
         retry_warnings: warnings.as_slice().to_vec(),
+        base: Some(base.clone()),
     })
 }
 
@@ -2433,16 +2567,19 @@ pub fn run_branches_merged_into(
         .collect())
 }
 
+/// `git worktree add <path> -b <branch> <base_ref>`: `base_ref` is what
+/// [`resolve_worktree_base`] chose — `HEAD`, or the task's resume branch.
 fn create_worktree(
     repo_root: &Utf8Path,
     path: &Utf8Path,
     branch: &str,
+    base_ref: &str,
     worktree_add_timeout_ms: u64,
     warnings: &mut RetryWarnings,
 ) -> crate::Result<()> {
     let output = run_git_retrying_with_timeout(
         repo_root,
-        &["worktree", "add", path.as_str(), "-b", branch, "HEAD"],
+        &["worktree", "add", path.as_str(), "-b", branch, base_ref],
         "worktree-add",
         warnings,
         worktree_add_timeout_ms,
@@ -2862,6 +2999,179 @@ fn config_error(field_path: impl Into<String>, message: impl Into<String>) -> cr
         }
         .into(),
     )
+}
+
+#[cfg(test)]
+mod task_branch_tests {
+    use super::*;
+    use std::process::Command;
+
+    fn git(dir: &Utf8Path, args: &[&str]) -> String {
+        let output = Command::new("git")
+            .args(args)
+            .current_dir(dir.as_std_path())
+            .output()
+            .unwrap_or_else(|error| panic!("git {args:?} failed to spawn: {error}"));
+        assert!(
+            output.status.success(),
+            "git {args:?} exited non-zero: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8(output.stdout)
+            .expect("git output is UTF-8")
+            .trim()
+            .to_string()
+    }
+
+    fn fresh_repo(tag: &str) -> Utf8PathBuf {
+        let root = Utf8PathBuf::from_path_buf(std::env::temp_dir()).expect("temp dir is UTF-8");
+        let repo = root.join(format!(
+            "ctx-task-branch-test-{tag}-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        if repo.exists() {
+            std::fs::remove_dir_all(repo.as_std_path()).expect("clear stale scratch repo");
+        }
+        std::fs::create_dir_all(repo.as_std_path()).expect("create scratch repo dir");
+        git(&repo, &["init", "--quiet"]);
+        git(&repo, &["config", "user.name", "ctx-task-branch-test"]);
+        git(
+            &repo,
+            &["config", "user.email", "task-branch-test@example.invalid"],
+        );
+        repo
+    }
+
+    fn commit_file(repo: &Utf8Path, name: &str, message: &str) {
+        std::fs::write(repo.join(name).as_std_path(), message.as_bytes()).expect("write file");
+        git(repo, &["add", name]);
+        git(repo, &["commit", "--quiet", "-m", message]);
+    }
+
+    /// A repository whose `ctx/task/<key>` branch is one commit ahead of the
+    /// checkout's `HEAD` — the shape a task's earlier run leaves behind after
+    /// a stage commit. Returns `(repo, head, task branch tip)`.
+    fn repo_with_task_branch(tag: &str, task_key: &str) -> (Utf8PathBuf, String, String) {
+        let repo = fresh_repo(tag);
+        commit_file(&repo, "base.txt", "base");
+        let head = git(&repo, &["rev-parse", "HEAD"]);
+        let branch = task_branch_name(task_key);
+        git(&repo, &["switch", "--quiet", "-c", branch.as_str()]);
+        commit_file(&repo, "stage-1.txt", "stage 1 committed");
+        let task_tip = git(&repo, &["rev-parse", "HEAD"]);
+        git(&repo, &["switch", "--quiet", "-"]);
+        assert_eq!(git(&repo, &["rev-parse", "HEAD"]), head);
+        (repo, head, task_tip)
+    }
+
+    fn cleanup(repo: &Utf8Path) {
+        std::fs::remove_dir_all(repo.as_std_path()).ok();
+    }
+
+    #[test]
+    fn worktree_base_is_the_task_branch_tip_when_the_branch_exists() {
+        let (repo, head, task_tip) = repo_with_task_branch("base-task", "0001.2");
+        let base = resolve_worktree_base(&repo, Some("0001.2")).expect("resolve base");
+        assert_eq!(base.reference, "ctx/task/0001.2");
+        assert_eq!(base.sha, task_tip);
+        assert_ne!(
+            base.sha, head,
+            "the task branch must be ahead of HEAD for this proof"
+        );
+        cleanup(&repo);
+    }
+
+    #[test]
+    fn worktree_base_is_head_without_a_task_branch_or_without_a_task() {
+        let (repo, head, _) = repo_with_task_branch("base-head", "0001.2");
+        let other_task = resolve_worktree_base(&repo, Some("0009")).expect("resolve base");
+        assert_eq!(other_task.reference, "HEAD");
+        assert_eq!(other_task.sha, head);
+        let no_task = resolve_worktree_base(&repo, None).expect("resolve base");
+        assert_eq!(no_task.reference, "HEAD");
+        assert_eq!(no_task.sha, head);
+        cleanup(&repo);
+    }
+
+    #[test]
+    fn a_run_worktree_created_from_the_task_branch_checks_out_its_tip_on_the_run_branch() {
+        let (repo, head, task_tip) = repo_with_task_branch("create-task", "0001.2");
+        let base = resolve_worktree_base(&repo, Some("0001.2")).expect("resolve base");
+        let path = repo.join("wt-run");
+        let mut warnings = RetryWarnings::new();
+        create_worktree(
+            &repo,
+            &path,
+            "ctx/run/wt-run",
+            &base.reference,
+            crate::git_process::LONG_TIMEOUT_MS,
+            &mut warnings,
+        )
+        .expect("create worktree from the task branch");
+        assert_eq!(git(&path, &["rev-parse", "HEAD"]), task_tip);
+        assert_eq!(
+            git(&path, &["rev-parse", "--abbrev-ref", "HEAD"]),
+            "ctx/run/wt-run",
+            "the run branch name is unchanged by the base choice"
+        );
+        assert!(path.join("stage-1.txt").exists());
+        assert_eq!(
+            git(&repo, &["rev-parse", "HEAD"]),
+            head,
+            "the invocation checkout is untouched"
+        );
+        git(&repo, &["worktree", "remove", "--force", path.as_str()]);
+        cleanup(&repo);
+    }
+
+    #[test]
+    fn a_run_worktree_without_a_task_branch_starts_from_head() {
+        let (repo, head, task_tip) = repo_with_task_branch("create-head", "0001.2");
+        let base = resolve_worktree_base(&repo, Some("0009")).expect("resolve base");
+        let path = repo.join("wt-run");
+        let mut warnings = RetryWarnings::new();
+        create_worktree(
+            &repo,
+            &path,
+            "ctx/run/wt-run",
+            &base.reference,
+            crate::git_process::LONG_TIMEOUT_MS,
+            &mut warnings,
+        )
+        .expect("create worktree from HEAD");
+        assert_eq!(git(&path, &["rev-parse", "HEAD"]), head);
+        assert_ne!(git(&path, &["rev-parse", "HEAD"]), task_tip);
+        assert!(!path.join("stage-1.txt").exists());
+        git(&repo, &["worktree", "remove", "--force", path.as_str()]);
+        cleanup(&repo);
+    }
+
+    #[test]
+    fn delete_task_branch_releases_an_existing_branch_and_ignores_a_missing_one() {
+        let (repo, _, _) = repo_with_task_branch("delete", "0001.2");
+        let mut warnings = RetryWarnings::new();
+        assert_eq!(
+            delete_task_branch(&repo, "0001.2", &mut warnings).expect("delete"),
+            Some("ctx/task/0001.2".to_string())
+        );
+        assert!(
+            local_branch_tip(&repo, "ctx/task/0001.2")
+                .expect("lookup")
+                .is_none(),
+            "the branch is gone"
+        );
+        assert_eq!(
+            delete_task_branch(&repo, "0001.2", &mut warnings).expect("delete again"),
+            None,
+            "a second release is a no-op, never an error"
+        );
+        assert_eq!(
+            delete_task_branch(&repo, "0009", &mut warnings).expect("never existed"),
+            None
+        );
+        cleanup(&repo);
+    }
 }
 
 #[cfg(test)]

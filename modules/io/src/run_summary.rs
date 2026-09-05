@@ -368,6 +368,7 @@ mod tests {
             branch: "ctx/run/worktree-id".to_string(),
             seed_snapshots: Vec::new(),
             path: Some("/tmp/worktree-id".to_string()),
+            base: None,
         });
 
         let summary = RunSummary::from_session(&session);

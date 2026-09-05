@@ -2312,7 +2312,34 @@ fn merge_locked(args: MergeLockedInputs<'_>) -> crate::Result<MergeReport> {
                             retry_warnings,
                         ) {
                             Err(error) => Some(("branch delete failed", error.to_string())),
-                            Ok(()) => None,
+                            // Runs resume the task branch (0281): once the
+                            // task's work is on the landing branch its
+                            // `ctx/task/<key>` resume branch is released,
+                            // so a later run of a re-opened task starts from
+                            // the landing branch again. Only reached after
+                            // the fast-forward succeeded — a parked or
+                            // failed landing keeps the branch for the next
+                            // run to resume from.
+                            Ok(()) => match session.provenance.task_key.as_deref() {
+                                Some(task_key) => {
+                                    match ctx_traits_io::worktree::delete_task_branch(
+                                        repo_root,
+                                        task_key,
+                                        retry_warnings,
+                                    ) {
+                                        Err(error) => {
+                                            Some(("task branch delete failed", error.to_string()))
+                                        }
+                                        Ok(Some(branch)) => {
+                                            landed_evidence
+                                                .push(format!("task-branch-released={branch}"));
+                                            None
+                                        }
+                                        Ok(None) => None,
+                                    }
+                                }
+                                None => None,
+                            },
                         },
                     }
                 }
