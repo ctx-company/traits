@@ -410,7 +410,7 @@ impl MergeClass {
 }
 
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
-struct MergeRow {
+pub(super) struct MergeRow {
     session_id: String,
     run_id: String,
     ledger_path: camino::Utf8PathBuf,
@@ -462,6 +462,8 @@ struct MergePreviewFacts {
     /// is no longer registered (landed/cleaned up) and Git facts could not be
     /// computed.
     produced: Option<MergeProduced>,
+    /// Git-derived produced facts are being computed by the dashboard worker.
+    produced_pending: bool,
     explanation: Option<merge_story::Explanation>,
     gate_rows: Vec<merge_story::GateRow>,
     worktree_path: Option<String>,
@@ -473,7 +475,7 @@ struct MergePreviewFacts {
     not_merged: Option<crate::app::run::NotMergedFact>,
 }
 
-enum MergeProduced {
+pub(super) enum MergeProduced {
     Nothing,
     DocsOnly { files: usize },
     Commits { commits: usize, files: usize },
@@ -1460,6 +1462,7 @@ impl State {
         let explanation_results = worker.explanation_results();
         let preview_results = worker.preview_results();
         let trait_detail_results = worker.trait_detail_results();
+        let merge_detail_results = worker.merge_detail_results();
         let board_refresh_results = worker.board_refresh_results();
         let refresh_results = worker.refresh_results();
         for result in explanation_results {
@@ -1489,6 +1492,7 @@ impl State {
         }
         self.apply_preview_results(preview_results);
         self.apply_trait_detail_results(trait_detail_results);
+        self.apply_merge_detail_results(merge_detail_results);
         self.apply_board_results(board_refresh_results);
         self.apply_refresh_results(refresh_results);
     }
@@ -1534,6 +1538,29 @@ impl State {
                     }
                 }
             }
+        }
+    }
+
+    fn apply_merge_detail_results(
+        &mut self,
+        results: impl IntoIterator<Item = worker::MergeDetailResult>,
+    ) {
+        for result in results {
+            let selected = self.merges.get(self.selected());
+            if !selected.is_some_and(|row| {
+                row.session_id == result.session_id
+                    && merge_preview_cache_key(row) == result.cache_key
+            }) {
+                continue;
+            }
+            let Some(row) = selected else { continue };
+            self.merge_preview = Some(build_merge_preview(
+                row,
+                result.cache_key,
+                result.worktree_path,
+                result.produced,
+                false,
+            ));
         }
     }
 
@@ -4317,7 +4344,21 @@ fn refresh_merge_preview_for_selection(state: &mut State) {
     {
         return;
     }
-    state.merge_preview = Some(build_merge_preview(row, cache_key));
+    if !same_selection {
+        state.merge_preview = Some(build_merge_preview(
+            row,
+            cache_key.clone(),
+            None,
+            None,
+            true,
+        ));
+    }
+    if let Some(worker) = &state.worker {
+        worker.merge_detail(worker::MergeDetailRequest {
+            row: row.clone(),
+            cache_key,
+        });
+    }
 }
 
 /// The cache key for a MERGES row's preview: the last terminal frame's stage
@@ -4338,27 +4379,20 @@ fn merge_preview_cache_key(row: &MergeRow) -> (String, String) {
     (frame_identity, branch)
 }
 
-/// IO edge (§3.4): resolves git facts (merge-base, changed paths, commit
-/// count) for a same-repository row with a still-registered worktree, then
-/// hands off to the pure [`merge_preview_lines`] for rendering. Never claims
-/// a produced-artifact fact it could not compute — a foreign-repository row
-/// or an unregistered worktree renders "gone"/unavailable, never guessed.
-fn build_merge_preview(row: &MergeRow, cache_key: (String, String)) -> MergePreview {
+/// Renders a row from pure facts delivered by the worker.
+fn build_merge_preview(
+    row: &MergeRow,
+    cache_key: (String, String),
+    worktree_path: Option<camino::Utf8PathBuf>,
+    produced: Option<MergeProduced>,
+    produced_pending: bool,
+) -> MergePreview {
     let explanation = row.last_frame.as_ref().map(merge_story::explain_frame);
     let gate_rows = row
         .last_frame
         .as_ref()
         .map(|frame| merge_story::gate_rows(&frame.evidence))
         .unwrap_or_default();
-    let worktree_path = resolve_merge_worktree_path(row);
-    let produced = worktree_path.as_ref().and_then(|path| {
-        merge_produced(
-            path,
-            row.worktree
-                .as_ref()
-                .map(|worktree| worktree.branch.as_str()),
-        )
-    });
     let facts = MergePreviewFacts {
         run_id: row.run_id.clone(),
         phase: row.phase.clone(),
@@ -4366,6 +4400,7 @@ fn build_merge_preview(row: &MergeRow, cache_key: (String, String)) -> MergePrev
         class: row.class,
         stage: row.stage,
         produced,
+        produced_pending,
         explanation,
         gate_rows,
         worktree_path: worktree_path.as_ref().map(|path| path.to_string()),
@@ -4389,7 +4424,10 @@ fn build_merge_preview(row: &MergeRow, cache_key: (String, String)) -> MergePrev
 /// Classifies what a run produced (§3.4 point 2): `merge_base(main, branch)`
 /// then `changed_paths` then a commit count — never run for a row whose
 /// worktree could not be resolved (the caller already degraded to `None`).
-fn merge_produced(worktree_path: &camino::Utf8Path, branch: Option<&str>) -> Option<MergeProduced> {
+pub(super) fn merge_produced(
+    worktree_path: &camino::Utf8Path,
+    branch: Option<&str>,
+) -> Option<MergeProduced> {
     let branch = branch?;
     let repo_root = ctx_traits_io::repository::discover_repo_root().ok()?;
     let mut warnings = ctx_traits_io::worktree::RetryWarnings::new();
@@ -4459,6 +4497,7 @@ fn merge_preview_lines(facts: &MergePreviewFacts) -> Vec<tui::Line> {
             Some(MergeProduced::Commits { commits, files }) => {
                 format!("{commits} commit(s), {files} file(s)")
             }
+            None if facts.produced_pending => "(checking git facts...)".to_string(),
             None => "(unavailable — worktree not registered or unreachable)".to_string(),
         },
         tui::Tone::Default,
@@ -5375,7 +5414,7 @@ fn print_merge_worktree_path(state: &mut State) {
 /// Resolves the selected row's worktree path via one git registration probe
 /// — `None` when the row names no worktree, belongs to a foreign repository
 /// (ALL mode), or is no longer registered.
-fn resolve_merge_worktree_path(row: &MergeRow) -> Option<camino::Utf8PathBuf> {
+pub(super) fn resolve_merge_worktree_path(row: &MergeRow) -> Option<camino::Utf8PathBuf> {
     let worktree = row.worktree.as_ref()?;
     let repo_root = ctx_traits_io::repository::discover_repo_root().ok()?;
     let same_repo = row.repo_path.is_none() || row.repo_path.as_deref() == Some(repo_root.as_str());
@@ -12342,6 +12381,50 @@ argv = ["git", "commit", "-m", "fixture"]
         assert!(MergeClass::Landed.can_drop());
     }
 
+    #[test]
+    fn merge_preview_retains_same_selection_and_rejects_a_stale_worker_result() {
+        let mut state = State::new_without_worker();
+        state.screen = Screen::Merges;
+        state.merges = vec![merges_test_row("first", MergeClass::Mergeable)];
+        refresh_merge_preview_for_selection(&mut state);
+        let pending = state.merge_preview.as_ref().expect("pending preview");
+        assert!(
+            pending
+                .lines
+                .iter()
+                .map(ToString::to_string)
+                .any(|line| line.contains("checking git facts")),
+            "a new selection explicitly reports pending git facts"
+        );
+        let retained = pending.lines.clone();
+
+        refresh_merge_preview_for_selection(&mut state);
+        assert_eq!(
+            state
+                .merge_preview
+                .as_ref()
+                .expect("retained preview")
+                .lines,
+            retained
+        );
+
+        state.merges[0].session_id = "second".to_string();
+        state.apply_merge_detail_results([worker::MergeDetailResult {
+            session_id: "first".to_string(),
+            cache_key: ("none".to_string(), String::new()),
+            worktree_path: None,
+            produced: None,
+        }]);
+        assert_eq!(
+            state
+                .merge_preview
+                .as_ref()
+                .expect("stale preview ignored")
+                .lines,
+            retained
+        );
+    }
+
     // `MergeRow::headline` must honor its own documented contract (empty for
     // `Landed`/`Mergeable`) rather than showing a translated headline the
     // list row has no use for — guards the recurrence of
@@ -13856,6 +13939,7 @@ argv = ["git", "commit", "-m", "fixture"]
             class: MergeClass::Mergeable,
             stage: None,
             produced: None,
+            produced_pending: false,
             explanation: None,
             gate_rows: Vec::new(),
             worktree_path: None,

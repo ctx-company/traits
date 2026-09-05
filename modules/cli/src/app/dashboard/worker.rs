@@ -5,9 +5,10 @@ use std::sync::{Arc, mpsc};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use super::{
-    AttachedView, DashboardSnapshot, Screen, SessionPreviewRequest, State, TasksBoardSnapshot,
-    build_attached_view, persist_board_snapshot, read_board_snapshot, refresh_attached_view,
-    sessions_cache, sessions_cache_root,
+    AttachedView, DashboardSnapshot, MergeProduced, MergeRow, Screen, SessionPreviewRequest, State,
+    TasksBoardSnapshot, build_attached_view, merge_produced, persist_board_snapshot,
+    read_board_snapshot, refresh_attached_view, resolve_merge_worktree_path, sessions_cache,
+    sessions_cache_root,
 };
 
 use ctx_traits_io::center::{ControlAction, StartResult};
@@ -18,6 +19,19 @@ pub(super) type PreviewResult = AttachedView;
 pub(super) struct TraitDetailResult {
     pub(super) selector: ctx_traits_io::library::LibraryDetailSelector,
     pub(super) result: Result<ctx_traits_io::library::LibraryDetailResolution, String>,
+}
+
+#[derive(Clone)]
+pub(super) struct MergeDetailRequest {
+    pub(super) row: MergeRow,
+    pub(super) cache_key: (String, String),
+}
+
+pub(super) struct MergeDetailResult {
+    pub(super) session_id: String,
+    pub(super) cache_key: (String, String),
+    pub(super) worktree_path: Option<camino::Utf8PathBuf>,
+    pub(super) produced: Option<MergeProduced>,
 }
 
 #[derive(Clone)]
@@ -42,6 +56,7 @@ pub(super) struct Handle {
     snapshots: mpsc::Receiver<RefreshResult>,
     previews: mpsc::Receiver<PreviewResult>,
     trait_details: mpsc::Receiver<TraitDetailResult>,
+    merge_details: mpsc::Receiver<MergeDetailResult>,
     board_refreshes: mpsc::Receiver<BoardRefreshResult>,
     explanations: mpsc::Receiver<ExplanationResult>,
     actions: mpsc::Receiver<ActionResult>,
@@ -135,6 +150,7 @@ enum Command {
     },
     Preview(SessionPreviewRequest),
     TraitDetail(ctx_traits_io::library::LibraryDetailSelector),
+    MergeDetail(MergeDetailRequest),
     BoardRefresh(BoardRefreshRequest),
     /// Kept for test-only command projections; it never reads library files.
     #[cfg(test)]
@@ -148,6 +164,7 @@ impl Handle {
         let (snapshot_tx, snapshots) = mpsc::channel();
         let (preview_tx, previews) = mpsc::channel();
         let (trait_detail_tx, trait_details) = mpsc::channel();
+        let (merge_detail_tx, merge_details) = mpsc::channel();
         let (board_refresh_tx, board_refreshes) = mpsc::channel();
         let (explanation_tx, explanations) = mpsc::channel();
         let (action_sender, actions) = mpsc::channel();
@@ -157,6 +174,7 @@ impl Handle {
                 snapshot_tx,
                 preview_tx,
                 trait_detail_tx,
+                merge_detail_tx,
                 board_refresh_tx,
                 explanation_tx,
             )
@@ -166,6 +184,7 @@ impl Handle {
             snapshots,
             previews,
             trait_details,
+            merge_details,
             board_refreshes,
             explanations,
             actions,
@@ -179,6 +198,7 @@ impl Handle {
         let (_snapshot_tx, snapshots) = mpsc::channel();
         let (_preview_tx, previews) = mpsc::channel();
         let (_trait_detail_tx, trait_details) = mpsc::channel();
+        let (_merge_detail_tx, merge_details) = mpsc::channel();
         let (_board_refresh_tx, board_refreshes) = mpsc::channel();
         let (_explanation_tx, explanations) = mpsc::channel();
         let (action_sender, actions) = mpsc::channel();
@@ -187,6 +207,7 @@ impl Handle {
             snapshots,
             previews,
             trait_details,
+            merge_details,
             board_refreshes,
             explanations,
             actions,
@@ -280,6 +301,10 @@ impl Handle {
         let _ = self.commands.send(Command::TraitDetail(selector));
     }
 
+    pub(super) fn merge_detail(&self, request: MergeDetailRequest) {
+        let _ = self.commands.send(Command::MergeDetail(request));
+    }
+
     pub(super) fn refresh_board(&self, request: BoardRefreshRequest) {
         let _ = self.commands.send(Command::BoardRefresh(request));
     }
@@ -295,6 +320,14 @@ impl Handle {
     pub(super) fn trait_detail_results(&self) -> Vec<TraitDetailResult> {
         let mut results = Vec::new();
         while let Ok(result) = self.trait_details.try_recv() {
+            results.push(result);
+        }
+        results
+    }
+
+    pub(super) fn merge_detail_results(&self) -> Vec<MergeDetailResult> {
+        let mut results = Vec::new();
+        while let Ok(result) = self.merge_details.try_recv() {
             results.push(result);
         }
         results
@@ -391,6 +424,7 @@ fn run(
     snapshots: mpsc::Sender<RefreshResult>,
     previews: mpsc::Sender<PreviewResult>,
     trait_details: mpsc::Sender<TraitDetailResult>,
+    merge_details: mpsc::Sender<MergeDetailResult>,
     board_refreshes: mpsc::Sender<BoardRefreshResult>,
     explanations: mpsc::Sender<ExplanationResult>,
 ) {
@@ -416,6 +450,7 @@ fn run(
                     &snapshots,
                     &previews,
                     &trait_details,
+                    &merge_details,
                     &board_refreshes,
                     &explanations,
                     &mut state,
@@ -442,6 +477,7 @@ fn run(
                             &snapshots,
                             &previews,
                             &trait_details,
+                            &merge_details,
                             &board_refreshes,
                             &explanations,
                             &mut state,
@@ -594,6 +630,7 @@ fn run(
             &snapshots,
             &previews,
             &trait_details,
+            &merge_details,
             &board_refreshes,
             &explanations,
             &mut state,
@@ -656,6 +693,7 @@ fn wait_for_retry(
     snapshots: &mpsc::Sender<RefreshResult>,
     previews: &mpsc::Sender<PreviewResult>,
     trait_details: &mpsc::Sender<TraitDetailResult>,
+    merge_details: &mpsc::Sender<MergeDetailResult>,
     board_refreshes: &mpsc::Sender<BoardRefreshResult>,
     explanations: &mpsc::Sender<ExplanationResult>,
     state: &mut State,
@@ -675,6 +713,7 @@ fn wait_for_retry(
                 snapshots,
                 previews,
                 trait_details,
+                merge_details,
                 board_refreshes,
                 explanations,
                 state,
@@ -694,6 +733,7 @@ fn handle_one_command(
     snapshots: &mpsc::Sender<RefreshResult>,
     previews: &mpsc::Sender<PreviewResult>,
     trait_details: &mpsc::Sender<TraitDetailResult>,
+    merge_details: &mpsc::Sender<MergeDetailResult>,
     board_refreshes: &mpsc::Sender<BoardRefreshResult>,
     explanations: &mpsc::Sender<ExplanationResult>,
     state: &mut State,
@@ -715,6 +755,27 @@ fn handle_one_command(
                 let _ = sender.send(TraitDetailResult { selector, result });
             });
             Ok(())
+        }
+        Command::MergeDetail(request) => {
+            let worktree_path = resolve_merge_worktree_path(&request.row);
+            let produced = worktree_path.as_ref().and_then(|path| {
+                merge_produced(
+                    path,
+                    request
+                        .row
+                        .worktree
+                        .as_ref()
+                        .map(|worktree| worktree.branch.as_str()),
+                )
+            });
+            merge_details
+                .send(MergeDetailResult {
+                    session_id: request.row.session_id,
+                    cache_key: request.cache_key,
+                    worktree_path,
+                    produced,
+                })
+                .map_err(|_| ())
         }
         Command::BoardRefresh(request) => {
             board_refreshes.send(refresh_board(request)).map_err(|_| ())
@@ -1037,6 +1098,7 @@ mod tests {
             let (snapshot_tx, snapshots) = mpsc::channel();
             let (preview_tx, _preview_rx) = mpsc::channel();
             let (trait_detail_tx, _trait_detail_rx) = mpsc::channel();
+            let (merge_detail_tx, _merge_detail_rx) = mpsc::channel();
             let (board_refresh_tx, _board_refresh_rx) = mpsc::channel();
             let (explanation_tx, _explanation_rx) = mpsc::channel();
             let worker = std::thread::Builder::new()
@@ -1047,6 +1109,7 @@ mod tests {
                         snapshot_tx,
                         preview_tx,
                         trait_detail_tx,
+                        merge_detail_tx,
                         board_refresh_tx,
                         explanation_tx,
                     )
@@ -1224,6 +1287,7 @@ mod tests {
         let (snapshots, results) = mpsc::channel();
         let (previews, _preview_results) = mpsc::channel();
         let (trait_details, _trait_detail_results) = mpsc::channel();
+        let (merge_details, _merge_detail_results) = mpsc::channel();
         let (board_refreshes, _board_refresh_results) = mpsc::channel();
         let (explanations, _explanation_results) = mpsc::channel();
         let mut state = State::new_without_worker();
@@ -1234,6 +1298,7 @@ mod tests {
             &snapshots,
             &previews,
             &trait_details,
+            &merge_details,
             &board_refreshes,
             &explanations,
             &mut state,
@@ -1260,6 +1325,7 @@ mod tests {
         let (snapshots, results) = mpsc::channel();
         let (previews, _preview_results) = mpsc::channel();
         let (trait_details, _trait_detail_results) = mpsc::channel();
+        let (merge_details, _merge_detail_results) = mpsc::channel();
         let (board_refreshes, _board_refresh_results) = mpsc::channel();
         let (explanations, _explanation_results) = mpsc::channel();
         let mut state = State::new_without_worker();
@@ -1279,6 +1345,7 @@ mod tests {
             &snapshots,
             &previews,
             &trait_details,
+            &merge_details,
             &board_refreshes,
             &explanations,
             &mut state,
@@ -1302,6 +1369,7 @@ mod tests {
         let (snapshots, results) = mpsc::channel();
         let (previews, _preview_results) = mpsc::channel();
         let (trait_details, _trait_detail_results) = mpsc::channel();
+        let (merge_details, _merge_detail_results) = mpsc::channel();
         let (board_refreshes, _board_refresh_results) = mpsc::channel();
         let (explanations, _explanation_results) = mpsc::channel();
         let mut state = State::new_without_worker();
@@ -1318,6 +1386,7 @@ mod tests {
             &snapshots,
             &previews,
             &trait_details,
+            &merge_details,
             &board_refreshes,
             &explanations,
             &mut state,
@@ -1341,6 +1410,7 @@ mod tests {
         let (snapshot_tx, snapshots) = mpsc::channel();
         let (_preview_tx, previews) = mpsc::channel();
         let (_trait_detail_tx, trait_details) = mpsc::channel();
+        let (_merge_detail_tx, merge_details) = mpsc::channel();
         let (_board_refresh_tx, board_refreshes) = mpsc::channel();
         let (_explanation_tx, explanations) = mpsc::channel();
         let (action_sender, actions) = mpsc::channel();
@@ -1349,6 +1419,7 @@ mod tests {
             snapshots,
             previews,
             trait_details,
+            merge_details,
             board_refreshes,
             explanations,
             actions,
@@ -1545,6 +1616,7 @@ mod tests {
         let (snapshots, results) = mpsc::channel();
         let (previews, _preview_results) = mpsc::channel();
         let (trait_details, _trait_detail_results) = mpsc::channel();
+        let (merge_details, _merge_detail_results) = mpsc::channel();
         let (board_refreshes, _board_refresh_results) = mpsc::channel();
         let (explanations, _explanation_results) = mpsc::channel();
         let mut state = State::new_without_worker();
@@ -1564,6 +1636,7 @@ mod tests {
             &snapshots,
             &previews,
             &trait_details,
+            &merge_details,
             &board_refreshes,
             &explanations,
             &mut state,
@@ -2119,12 +2192,14 @@ mod tests {
         let (exited_tx, exited_rx) = mpsc::channel();
         let worker = std::thread::spawn(move || {
             let (trait_detail_tx, _trait_detail_rx) = mpsc::channel();
+            let (merge_detail_tx, _merge_detail_rx) = mpsc::channel();
             let (board_refresh_tx, _board_refresh_rx) = mpsc::channel();
             run(
                 command_rx,
                 snapshot_tx,
                 preview_tx,
                 trait_detail_tx,
+                merge_detail_tx,
                 board_refresh_tx,
                 explanation_tx,
             );
