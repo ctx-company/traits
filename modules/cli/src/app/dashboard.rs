@@ -6263,7 +6263,7 @@ fn resync_tasks_board_after_write_in(state: &mut State, dir: &camino::Utf8Path) 
 /// Queues a worker-owned board operation. The renderer keeps its accepted
 /// snapshot while the operation is pending.
 fn queue_tasks_board_refresh(state: &mut State, force: bool, report_sync: bool) {
-    if state.tasks_refresh_pending {
+    if state.tasks_refresh_pending && !force {
         return;
     }
     let dir = match super::tasks::board_dir(None) {
@@ -6282,21 +6282,32 @@ fn queue_tasks_board_refresh(state: &mut State, force: bool, report_sync: bool) 
         .tasks_board
         .as_ref()
         .map(|board| board.fingerprint.clone());
-    state.tasks_refresh_generation = state.tasks_refresh_generation.wrapping_add(1);
-    state.tasks_refresh_pending = true;
+    let generation = begin_tasks_board_refresh(state, force)
+        .expect("automatic duplicates are filtered before a refresh begins");
     let request = worker::BoardRefreshRequest {
         board_dir: dir,
         cache_root,
         last_known_fingerprint,
         force,
         report_sync,
-        generation: state.tasks_refresh_generation,
+        generation,
     };
     if let Some(worker) = &state.worker {
         worker.refresh_board(request);
     } else {
         state.tasks_refresh_pending = false;
     }
+}
+
+/// A forced refresh supersedes an in-flight automatic request, making the
+/// forced result the only one the renderer can apply.
+fn begin_tasks_board_refresh(state: &mut State, force: bool) -> Option<u64> {
+    if state.tasks_refresh_pending && !force {
+        return None;
+    }
+    state.tasks_refresh_generation = state.tasks_refresh_generation.wrapping_add(1);
+    state.tasks_refresh_pending = true;
+    Some(state.tasks_refresh_generation)
 }
 
 /// The 2s tick queues its fingerprint sweep and possible re-read on the
@@ -14863,6 +14874,38 @@ argv = ["git", "commit", "-m", "fixture"]
 
         assert_eq!(state.tasks_board.as_ref().unwrap().summaries.len(), 1);
         assert!(state.tasks_refresh_pending);
+    }
+
+    #[test]
+    fn forced_board_refresh_supersedes_a_pending_automatic_request() {
+        let dir = tasks_board_tempdir();
+        write_task_toml(&dir, "0001-first.toml", "0001");
+        let mut state = state_with_scratch_cache();
+        state.tasks_board = Some(read_board_snapshot(&dir).expect("first board"));
+        rebuild_visible_tasks(&mut state);
+        state.tasks_refresh_generation = 7;
+        state.tasks_refresh_pending = true;
+
+        // `S` must not be absorbed by the tick's request: bumping the
+        // generation rejects the automatic result when it eventually arrives.
+        let generation = begin_tasks_board_refresh(&mut state, true);
+
+        assert_eq!(generation, Some(8));
+        assert!(state.tasks_refresh_pending);
+        state.apply_board_results([worker::BoardRefreshResult {
+            generation: 7,
+            report_sync: false,
+            result: Ok(None),
+        }]);
+        assert!(state.tasks_refresh_pending);
+        write_task_toml(&dir, "0002-second.toml", "0002");
+        state.apply_board_results([worker::BoardRefreshResult {
+            generation: 8,
+            report_sync: true,
+            result: Ok(Some(read_board_snapshot(&dir).expect("replacement board"))),
+        }]);
+        assert_eq!(state.tasks_board.as_ref().unwrap().summaries.len(), 2);
+        assert_eq!(state.message.as_deref(), Some("synced"));
     }
 
     #[test]
