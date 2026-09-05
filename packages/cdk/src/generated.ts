@@ -820,6 +820,30 @@ export type CanonicalFailureRoute = {
 export type CanonicalFailureTarget = string | CanonicalFailureRoute;
 
 /**
+ * Cross-revision identity and immutability for the items of an inline object
+ * schema when they appear in a list slot value.
+ * 
+ * `key` names the field that identifies one item across revisions of the
+ * same slot (a step's text, a blocker's id). `fields` names the fields of a
+ * matched item that may be set once and never changed afterwards: a value
+ * that differs from the previous revision's, or disappears, rejects the
+ * submission. Items with no matching key in the previous revision are new
+ * and unchecked; nested frozen lists are matched only inside their matched
+ * parent item.
+ */
+export type CanonicalFrozenFields = {
+  /**
+   * Declared fields that never change once set on a matched item. May be
+   * empty when the schema only supplies identity for nested frozen lists.
+   */
+  readonly "fields"?: readonly string[] | undefined;
+  /**
+   * The declared field whose value identifies an item across revisions.
+   */
+  readonly "key": string;
+};
+
+/**
  * One guard expression. A string ref is either `signal:<id>` or
  * `condition:<id>`. An array is OR/any composition.
  */
@@ -1435,6 +1459,12 @@ export type CanonicalSchemaDeclaration = {
    * Mutually exclusive with `resource`.
    */
   readonly "fields"?: Readonly<Record<string, CanonicalSchemaField>> | undefined;
+  /**
+   * Cross-revision identity and immutability for items of this inline
+   * object schema inside a list slot value (see [`FrozenFields`]).
+   * Requires `fields`.
+   */
+  readonly "frozen"?: CanonicalFrozenFields | undefined;
   /**
    * Schema identifier (e.g. `"scope"`).
    */

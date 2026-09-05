@@ -959,6 +959,21 @@ fn apply_runtime_write(
         value.acceptance = AcceptanceStatus::Rejected;
     }
     value.schema_validation.push(validation);
+    // The resulting revision is what a frozen declaration compares, whatever
+    // write mode produced it (see `frozen_fields_validation`).
+    if !rejected
+        && let Some(existing) = prior
+        && let Some(frozen) = frozen_fields_validation(
+            trait_ref,
+            &value.ref_text,
+            &destination_schema,
+            &value.value,
+            Some(&existing.value),
+        )
+    {
+        value.acceptance = AcceptanceStatus::Rejected;
+        value.schema_validation.push(frozen);
+    }
     Ok(value)
 }
 
@@ -1204,6 +1219,149 @@ pub fn finalize_outputs(
     }
     completions.sort_by(|a, b| a.port_ref.cmp(&b.port_ref));
     Ok(completions)
+}
+
+#[cfg(test)]
+mod frozen_write_mode_tests {
+    use super::*;
+    use serde_json::json;
+
+    /// Two slots over one frozen step schema: the merge path (object slot)
+    /// and the append path (list slot) both yield their result inside
+    /// `apply_runtime_write`, which is where the frozen comparison must run.
+    fn fixture_trait() -> crate::r#trait::Trait {
+        crate::encoding::decode_trait(
+            crate::encoding::Encoding::Toml,
+            r#"
+id = "frozen-write-modes"
+schema-version = "0.3"
+version = "0.1.0"
+name = "Frozen write modes"
+description = "Test fixture."
+
+[[schema]]
+id = "verdict"
+
+[schema.fields.status]
+schema = "schema:text"
+required = true
+
+[schema.fields.steps]
+schema = "[schema:blocker-step]"
+required = true
+
+[[schema]]
+id = "blocker-step"
+frozen = { key = "step", fields = ["done-when"] }
+
+[schema.fields.step]
+schema = "schema:text"
+required = true
+
+[schema.fields.done-when]
+schema = "schema:text"
+
+[[slot]]
+id = "review"
+schema = "schema:verdict"
+
+[[slot]]
+id = "steps"
+schema = "[schema:blocker-step]"
+"#,
+        )
+        .expect("fixture trait decodes")
+    }
+
+    fn resolved(
+        trait_ref: &crate::r#trait::Trait,
+        sink: &OutputSink,
+        value: JsonValue,
+        prior: Option<&JsonValue>,
+    ) -> Value {
+        let output = StepSlotOutput {
+            ref_text: sink.ref_text().to_string(),
+            value,
+            source: None,
+            producer_evidence: None,
+            command_execution: None,
+            producer_agent: None,
+            producer_harness: None,
+        };
+        runtime_value_for_output_sink(trait_ref, 0, sink, output, false, prior).expect("sink resolution")
+    }
+
+    fn accepted(trait_ref: &crate::r#trait::Trait, ref_text: &str, value: JsonValue) -> Value {
+        let value = resolved(trait_ref, &OutputSink::Ref(ref_text.to_string()), value, None);
+        assert_eq!(value.acceptance, AcceptanceStatus::Accepted);
+        value
+    }
+
+    fn merge_sink(ref_text: &str) -> OutputSink {
+        OutputSink::SlotOperation {
+            slot: ref_text.to_string(),
+            operation: WriteOperation::Merge,
+            optional: false,
+        }
+    }
+
+    #[test]
+    fn a_merge_that_rewrites_a_frozen_field_is_rejected_on_its_result() {
+        let trait_ref = fixture_trait();
+        let prior = accepted(
+            &trait_ref,
+            "slot:review",
+            json!({"status": "revise", "steps": [{"step": "s1", "done-when": "a"}]}),
+        );
+        let delta = resolved(
+            &trait_ref,
+            &merge_sink("slot:review"),
+            json!({"steps": [{"step": "s1", "done-when": "b"}]}),
+            Some(&prior.value),
+        );
+        assert_eq!(delta.acceptance, AcceptanceStatus::Accepted, "the delta itself is well-formed");
+        let result = apply_runtime_write(&trait_ref, &WriteOperation::Merge, Some(&prior), delta)
+            .expect("merge applies");
+        assert_eq!(result.acceptance, AcceptanceStatus::Rejected);
+        let reason = &result.schema_validation.last().expect("evidence").reason;
+        assert!(reason.contains("steps[step=s1].done-when changed"), "{reason}");
+    }
+
+    #[test]
+    fn an_append_that_reuses_a_key_with_different_frozen_text_is_rejected() {
+        let trait_ref = fixture_trait();
+        let prior = accepted(&trait_ref, "slot:steps", json!([{"step": "s1", "done-when": "a"}]));
+        let sink = OutputSink::SlotOperation {
+            slot: "slot:steps".to_string(),
+            operation: WriteOperation::Append,
+            optional: false,
+        };
+        let appended = resolved(&trait_ref, &sink, json!({"step": "s1", "done-when": "b"}), Some(&prior.value));
+        assert_eq!(appended.acceptance, AcceptanceStatus::Accepted, "the element itself is valid");
+        let result = apply_runtime_write(&trait_ref, &WriteOperation::Append, Some(&prior), appended)
+            .expect("append applies");
+        assert_eq!(result.acceptance, AcceptanceStatus::Rejected);
+        assert!(
+            result.schema_validation.last().expect("evidence").reason.contains("[step=s1].done-when changed"),
+            "{:?}",
+            result.schema_validation
+        );
+    }
+
+    #[test]
+    fn a_merge_that_only_flips_unfrozen_fields_is_accepted() {
+        let trait_ref = fixture_trait();
+        let prior = accepted(
+            &trait_ref,
+            "slot:review",
+            json!({"status": "revise", "steps": [{"step": "s1", "done-when": "a"}]}),
+        );
+        let delta = resolved(&trait_ref, &merge_sink("slot:review"), json!({"status": "approved"}), Some(&prior.value));
+        assert_eq!(delta.acceptance, AcceptanceStatus::Accepted);
+        let result = apply_runtime_write(&trait_ref, &WriteOperation::Merge, Some(&prior), delta)
+            .expect("merge applies");
+        assert_eq!(result.acceptance, AcceptanceStatus::Accepted);
+    }
 }
 
 #[cfg(test)]

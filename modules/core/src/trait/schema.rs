@@ -38,6 +38,29 @@ pub struct SchemaField {
     pub allowed: Option<Vec<Value>>,
 }
 
+/// Cross-revision identity and immutability for the items of an inline object
+/// schema when they appear in a list slot value.
+///
+/// `key` names the field that identifies one item across revisions of the
+/// same slot (a step's text, a blocker's id). `fields` names the fields of a
+/// matched item that may be set once and never changed afterwards: a value
+/// that differs from the previous revision's, or disappears, rejects the
+/// submission. Items with no matching key in the previous revision are new
+/// and unchecked; nested frozen lists are matched only inside their matched
+/// parent item.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+#[schemars(rename_all = "kebab-case")]
+pub struct FrozenFields {
+    /// The declared field whose value identifies an item across revisions.
+    pub key: String,
+
+    /// Declared fields that never change once set on a matched item. May be
+    /// empty when the schema only supplies identity for nested frozen lists.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub fields: Vec<String>,
+}
+
 /// A `[[schema]]` declaration: a named schema contract.
 ///
 /// Must have exactly one of `resource`, `fields`, or scalar `schema`.
@@ -70,6 +93,12 @@ pub struct Schema {
     /// Human-readable description of the schema.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+
+    /// Cross-revision identity and immutability for items of this inline
+    /// object schema inside a list slot value (see [`FrozenFields`]).
+    /// Requires `fields`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub frozen: Option<FrozenFields>,
 }
 
 /// Validate a list of schema declarations.
@@ -187,6 +216,14 @@ pub fn validate_schemas_with_ids(
             }
         }
 
+        if let Some(ref frozen) = schema.frozen {
+            validate_frozen_fields(
+                frozen,
+                schema.fields.as_ref(),
+                &format!("schema[{i}].frozen"),
+            )?;
+        }
+
         if let Some(ref schema_ref) = schema.schema {
             let schema_field = format!("schema[{i}].schema");
             match crate::schema::form::Schema::try_from_str(schema_ref) {
@@ -214,6 +251,59 @@ pub fn validate_schemas_with_ids(
 
     reject_recursive_schemas(schemas)?;
 
+    Ok(())
+}
+
+/// A `frozen` declaration names only declared fields: the key identifies an
+/// item, the frozen fields are distinct from it and from each other.
+fn validate_frozen_fields(
+    frozen: &FrozenFields,
+    fields: Option<&BTreeMap<String, SchemaField>>,
+    field_path: &str,
+) -> crate::Result<()> {
+    let invalid = |path: String, message: String| {
+        crate::Error::from(crate::manifest::Error::InvalidField {
+            field_path: path,
+            message,
+        })
+    };
+    let Some(fields) = fields else {
+        return Err(invalid(
+            field_path.to_string(),
+            "frozen requires inline fields: only object schemas carry identity across revisions"
+                .to_string(),
+        ));
+    };
+    if !fields.contains_key(&frozen.key) {
+        return Err(invalid(
+            format!("{field_path}.key"),
+            format!("frozen key {:?} is not a declared field", frozen.key),
+        ));
+    }
+    let mut seen = BTreeSet::new();
+    for (index, field_id) in frozen.fields.iter().enumerate() {
+        let item_path = format!("{field_path}.fields[{index}]");
+        if !fields.contains_key(field_id) {
+            return Err(invalid(
+                item_path,
+                format!("frozen field {field_id:?} is not a declared field"),
+            ));
+        }
+        if field_id == &frozen.key {
+            return Err(invalid(
+                item_path,
+                format!(
+                    "frozen field {field_id:?} is the key; the key identifies the item and is not itself frozen"
+                ),
+            ));
+        }
+        if !seen.insert(field_id.as_str()) {
+            return Err(invalid(
+                item_path,
+                format!("duplicate frozen field {field_id:?}"),
+            ));
+        }
+    }
     Ok(())
 }
 
@@ -460,12 +550,155 @@ mod tests {
             schema: None,
             allowed: None,
             description: None,
+            frozen: None,
         }
+    }
+
+    fn frozen_schema(id: &str, fields: &[(&str, &str)], key: &str, frozen: &[&str]) -> Schema {
+        let mut schema = object_schema(id, fields);
+        schema.frozen = Some(FrozenFields {
+            key: key.to_string(),
+            fields: frozen.iter().map(|field| field.to_string()).collect(),
+        });
+        schema
     }
 
     fn validate_all(schemas: &[Schema]) -> crate::Result<()> {
         let resource_ids: BTreeSet<&str> = BTreeSet::new();
         validate_schemas(schemas, &resource_ids)
+    }
+
+    fn expect_invalid_field(err: &crate::Error) -> (String, String) {
+        match err {
+            crate::Error::Manifest(crate::manifest::Error::InvalidField {
+                field_path,
+                message,
+            }) => (field_path.clone(), message.clone()),
+            other => panic!("expected InvalidField manifest error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn frozen_over_declared_fields_validates() {
+        let schemas = vec![frozen_schema(
+            "step",
+            &[
+                ("step", "schema:text"),
+                ("done-when", "schema:text"),
+                ("status", "schema:text"),
+            ],
+            "step",
+            &["done-when"],
+        )];
+        validate_all(&schemas).expect("frozen over declared fields must validate");
+    }
+
+    #[test]
+    fn frozen_with_identity_only_validates() {
+        let schemas = vec![frozen_schema(
+            "blocker",
+            &[("id", "schema:text")],
+            "id",
+            &[],
+        )];
+        validate_all(&schemas).expect("identity-only frozen must validate");
+    }
+
+    #[test]
+    fn frozen_requires_inline_fields() {
+        let mut schema = Schema {
+            id: "verdict".to_string(),
+            resource: None,
+            fields: None,
+            schema: Some("schema:text".to_string()),
+            allowed: Some(vec![Value::String("approved".to_string())]),
+            description: None,
+            frozen: None,
+        };
+        schema.frozen = Some(FrozenFields {
+            key: "id".to_string(),
+            fields: Vec::new(),
+        });
+        let err = validate_all(&[schema]).expect_err("scalar schema cannot be frozen");
+        let (path, message) = expect_invalid_field(&err);
+        assert_eq!(path, "schema[0].frozen");
+        assert!(message.contains("inline fields"), "message: {message}");
+    }
+
+    #[test]
+    fn frozen_key_must_be_declared() {
+        let schemas = vec![frozen_schema("step", &[("step", "schema:text")], "id", &[])];
+        let err = validate_all(&schemas).expect_err("undeclared key must be rejected");
+        let (path, message) = expect_invalid_field(&err);
+        assert_eq!(path, "schema[0].frozen.key");
+        assert!(message.contains("\"id\""), "message: {message}");
+    }
+
+    #[test]
+    fn frozen_field_must_be_declared_and_distinct_from_the_key() {
+        let undeclared = vec![frozen_schema(
+            "step",
+            &[("step", "schema:text")],
+            "step",
+            &["done-when"],
+        )];
+        let err = validate_all(&undeclared).expect_err("undeclared frozen field must be rejected");
+        let (path, message) = expect_invalid_field(&err);
+        assert_eq!(path, "schema[0].frozen.fields[0]");
+        assert!(
+            message.contains("not a declared field"),
+            "message: {message}"
+        );
+
+        let key_frozen = vec![frozen_schema(
+            "step",
+            &[("step", "schema:text")],
+            "step",
+            &["step"],
+        )];
+        let err = validate_all(&key_frozen).expect_err("key cannot be frozen");
+        let (_, message) = expect_invalid_field(&err);
+        assert!(message.contains("is the key"), "message: {message}");
+
+        let duplicate = vec![frozen_schema(
+            "step",
+            &[("step", "schema:text"), ("done-when", "schema:text")],
+            "step",
+            &["done-when", "done-when"],
+        )];
+        let err = validate_all(&duplicate).expect_err("duplicate frozen field must be rejected");
+        let (path, message) = expect_invalid_field(&err);
+        assert_eq!(path, "schema[0].frozen.fields[1]");
+        assert!(message.contains("duplicate"), "message: {message}");
+    }
+
+    #[test]
+    fn frozen_round_trips_through_toml() {
+        let toml_src = r#"
+[[schema]]
+id = "blocker-step"
+frozen = { key = "step", fields = ["done-when"] }
+
+[schema.fields.step]
+schema = "schema:text"
+required = true
+
+[schema.fields.done-when]
+schema = "schema:text"
+"#;
+        #[derive(Deserialize)]
+        struct Doc {
+            schema: Vec<Schema>,
+        }
+        let doc: Doc = toml::from_str(toml_src).expect("frozen table decodes");
+        assert_eq!(
+            doc.schema[0].frozen,
+            Some(FrozenFields {
+                key: "step".to_string(),
+                fields: vec!["done-when".to_string()],
+            })
+        );
+        validate_all(&doc.schema).expect("decoded frozen schema validates");
     }
 
     fn expect_recursive_message(err: &crate::Error) -> String {
