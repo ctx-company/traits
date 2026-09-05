@@ -2,11 +2,11 @@
 
 use std::collections::HashMap;
 use std::sync::{Arc, mpsc};
-use std::time::Duration;
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use super::{
     AttachedView, DashboardSnapshot, Screen, SessionPreviewRequest, State, build_attached_view,
-    refresh_attached_view,
+    refresh_attached_view, sessions_cache, sessions_cache_root,
 };
 
 use ctx_traits_io::center::{ControlAction, StartResult};
@@ -45,6 +45,64 @@ pub(super) struct ActionResult {
     pub(super) message: String,
     pub(super) session_id: Option<String>,
     pub(super) task_key: Option<String>,
+}
+
+/// Worker-local policy and payload tracking for the derived warm-start cache.
+struct SessionsCachePersistence {
+    debounce: sessions_cache::WriteDebounce,
+    last_persisted_payload: Option<Vec<u8>>,
+}
+
+impl SessionsCachePersistence {
+    fn new() -> Self {
+        Self {
+            debounce: sessions_cache::WriteDebounce::new(Duration::from_secs(2)),
+            last_persisted_payload: None,
+        }
+    }
+
+    fn persist_accepted_snapshot(&mut self, state: &State) {
+        self.write_if_needed(state, false);
+    }
+
+    fn flush(&mut self, state: &State) {
+        self.write_if_needed(state, true);
+    }
+
+    fn write_if_needed(&mut self, state: &State, force: bool) {
+        // An all-repositories projection cannot seed the scoped cold start.
+        if state.all_repos {
+            return;
+        }
+        let Some(cache_root) = sessions_cache_root(state) else {
+            return;
+        };
+        let Ok(repo_key) = ctx_traits_io::state::current_repo_key() else {
+            return;
+        };
+        let Ok(payload) = serde_json::to_vec(&(&repo_key, &state.sessions, &state.merges)) else {
+            return;
+        };
+        let changed = self.last_persisted_payload.as_ref() != Some(&payload);
+        if !changed || (!force && !self.debounce.admits(Instant::now(), changed)) {
+            return;
+        }
+
+        let captured_at = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        let record = sessions_cache::SessionsSnapshotRecord::new(
+            captured_at,
+            repo_key,
+            false,
+            state.sessions.clone(),
+            state.merges.clone(),
+        );
+        if sessions_cache::write_snapshot(&cache_root, &record).is_ok() {
+            self.last_persisted_payload = Some(payload);
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -300,6 +358,7 @@ fn run(
     let mut state = State::new_without_worker();
     let mut rows = HashMap::new();
     let mut last_snapshot_at = None;
+    let mut sessions_cache = SessionsCachePersistence::new();
     loop {
         let subscription = match ctx_traits_io::center::subscribe(None) {
             Ok(subscription) => subscription,
@@ -322,9 +381,11 @@ fn run(
                     &mut state,
                     &rows,
                     false,
+                    Some(&mut sessions_cache),
                 )
                 .is_err()
                 {
+                    sessions_cache.flush(&state);
                     return;
                 }
                 continue;
@@ -345,16 +406,21 @@ fn run(
                             &mut state,
                             &rows,
                             false,
+                            Some(&mut sessions_cache),
                         )
                         .is_err()
                         {
+                            sessions_cache.flush(&state);
                             return;
                         }
                     }
                     Err(mpsc::TryRecvError::Empty) => break,
                     // The subscription can remain healthy after the dashboard
                     // has gone away. Do not strand this IO thread in that case.
-                    Err(mpsc::TryRecvError::Disconnected) => return,
+                    Err(mpsc::TryRecvError::Disconnected) => {
+                        sessions_cache.flush(&state);
+                        return;
+                    }
                 }
             }
             match subscription.recv_timeout(Duration::from_millis(100)) {
@@ -373,6 +439,7 @@ fn run(
                         &mut state,
                         &candidate_rows,
                         None,
+                        Some(&mut sessions_cache),
                     ) {
                         Ok(accepted) => accepted,
                         Err(()) => return,
@@ -411,7 +478,11 @@ fn run(
                             match refresh_library(&mut state) {
                                 Ok(()) => {
                                     if emit_cached_rows_snapshot(
-                                        &snapshots, &mut state, &rows, false,
+                                        &snapshots,
+                                        &mut state,
+                                        &rows,
+                                        false,
+                                        Some(&mut sessions_cache),
                                     )
                                     .is_err()
                                     {
@@ -438,6 +509,7 @@ fn run(
                             &mut state,
                             &candidate_rows,
                             changed_ledger_path,
+                            Some(&mut sessions_cache),
                         ) {
                             Ok(accepted) => accepted,
                             Err(()) => return,
@@ -485,9 +557,11 @@ fn run(
             &mut state,
             &rows,
             false,
+            Some(&mut sessions_cache),
         )
         .is_err()
         {
+            sessions_cache.flush(&state);
             return;
         }
     }
@@ -544,6 +618,7 @@ fn wait_for_retry(
     state: &mut State,
     rows: &HashMap<String, ctx_traits_io::center::CenterPublicRow>,
     clear_refresh_error: bool,
+    mut sessions_cache: Option<&mut SessionsCachePersistence>,
 ) -> Result<(), ()> {
     let deadline = std::time::Instant::now() + Duration::from_millis(500);
     loop {
@@ -561,6 +636,7 @@ fn wait_for_retry(
                 state,
                 rows,
                 clear_refresh_error,
+                sessions_cache.as_deref_mut(),
             )?,
             Err(mpsc::RecvTimeoutError::Timeout) => return Ok(()),
             Err(mpsc::RecvTimeoutError::Disconnected) => return Err(()),
@@ -578,6 +654,7 @@ fn handle_one_command(
     state: &mut State,
     rows: &HashMap<String, ctx_traits_io::center::CenterPublicRow>,
     clear_refresh_error: bool,
+    mut sessions_cache: Option<&mut SessionsCachePersistence>,
 ) -> Result<(), ()> {
     match command {
         Command::Explain(request) => explanations.send(explain(request)).map_err(|_| ()),
@@ -596,7 +673,7 @@ fn handle_one_command(
         }
         #[cfg(test)]
         Command::Refresh => {
-            emit_cached_rows_snapshot(snapshots, state, rows, clear_refresh_error)?;
+            emit_cached_rows_snapshot(snapshots, state, rows, clear_refresh_error, None)?;
             Ok(())
         }
         Command::Render { all_repos, screen } => {
@@ -606,7 +683,13 @@ fn handle_one_command(
             state.screen = screen;
             // Rendering a scope toggle projects the accepted subscription map
             // with the same bounded presentation enrichment as a subscription.
-            let accepted = emit_cached_rows_snapshot(snapshots, state, rows, clear_refresh_error)?;
+            let accepted = emit_cached_rows_snapshot(
+                snapshots,
+                state,
+                rows,
+                clear_refresh_error,
+                sessions_cache.as_deref_mut(),
+            )?;
             if !accepted {
                 state.all_repos = previous_scope;
                 state.screen = previous_screen;
@@ -621,8 +704,17 @@ fn emit_subscription_snapshot(
     state: &mut State,
     rows: &HashMap<String, ctx_traits_io::center::CenterPublicRow>,
     changed_ledger_path: Option<String>,
+    sessions_cache: Option<&mut SessionsCachePersistence>,
 ) -> Result<bool, ()> {
-    emit_snapshot(snapshots, state, rows, true, true, changed_ledger_path)
+    emit_snapshot(
+        snapshots,
+        state,
+        rows,
+        true,
+        true,
+        changed_ledger_path,
+        sessions_cache,
+    )
 }
 
 fn refresh_library(state: &mut State) -> crate::Result<()> {
@@ -637,10 +729,19 @@ fn emit_cached_rows_snapshot(
     state: &mut State,
     rows: &HashMap<String, ctx_traits_io::center::CenterPublicRow>,
     clear_refresh_error: bool,
+    sessions_cache: Option<&mut SessionsCachePersistence>,
 ) -> Result<bool, ()> {
     // An explicit render may rebuild a scoped projection, so retain the same
     // enriched parked-Ask and trait-drift presentation as subscription renders.
-    emit_snapshot(snapshots, state, rows, clear_refresh_error, true, None)
+    emit_snapshot(
+        snapshots,
+        state,
+        rows,
+        clear_refresh_error,
+        true,
+        None,
+        sessions_cache,
+    )
 }
 
 fn emit_snapshot(
@@ -650,6 +751,7 @@ fn emit_snapshot(
     clear_refresh_error: bool,
     enrich_session_presentations: bool,
     changed_ledger_path: Option<String>,
+    sessions_cache: Option<&mut SessionsCachePersistence>,
 ) -> Result<bool, ()> {
     let rows: Vec<_> = rows.values().cloned().collect();
     let result = state
@@ -663,6 +765,9 @@ fn emit_snapshot(
         .map_err(|error| error.to_string());
     let accepted = result.is_ok();
     snapshots.send(result).map_err(|_| ())?;
+    if accepted && let Some(sessions_cache) = sessions_cache {
+        sessions_cache.persist_accepted_snapshot(state);
+    }
     Ok(accepted)
 }
 
@@ -749,6 +854,18 @@ mod tests {
     };
     use std::io::{Read, Write};
     use std::os::unix::net::UnixStream;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    static SESSIONS_CACHE_COUNTER: AtomicUsize = AtomicUsize::new(0);
+
+    fn sessions_cache_scratch_root() -> camino::Utf8PathBuf {
+        camino::Utf8PathBuf::from_path_buf(std::env::temp_dir().join(format!(
+            "dashboard-worker-sessions-cache-{}-{}",
+            std::process::id(),
+            SESSIONS_CACHE_COUNTER.fetch_add(1, Ordering::Relaxed),
+        )))
+        .expect("temporary path is utf8")
+    }
 
     #[test]
     fn start_action_result_reports_pre_registration_stderr() {
@@ -869,6 +986,102 @@ mod tests {
         row
     }
 
+    #[test]
+    fn accepted_snapshot_persists_sessions_cache() {
+        let (snapshots, results) = mpsc::channel();
+        let mut state = State::new_without_worker();
+        let cache_root = sessions_cache_scratch_root();
+        state.sessions_cache_root = Some(cache_root.clone());
+        let center_row = current_repo_row("completed", "cached title");
+        let rows = HashMap::from([(center_row.ledger_path.clone(), center_row)]);
+        let mut persistence = SessionsCachePersistence::new();
+
+        assert!(emit_subscription_snapshot(
+            &snapshots,
+            &mut state,
+            &rows,
+            None,
+            Some(&mut persistence),
+        )
+        .expect("emit accepted snapshot"));
+        let _ = results
+            .recv()
+            .expect("rendered snapshot")
+            .expect("snapshot success");
+
+        let cached = sessions_cache::read_snapshot(&cache_root).expect("persisted cache");
+        assert_eq!(
+            cached.repo_key,
+            ctx_traits_io::state::current_repo_key().unwrap()
+        );
+        assert_eq!(cached.sessions[0].title.as_deref(), Some("cached title"));
+    }
+
+    #[test]
+    fn sessions_cache_debounces_immediate_row_changes() {
+        let (snapshots, results) = mpsc::channel();
+        let mut state = State::new_without_worker();
+        let cache_root = sessions_cache_scratch_root();
+        state.sessions_cache_root = Some(cache_root.clone());
+        let mut persistence = SessionsCachePersistence::new();
+        let first = current_repo_row("completed", "first");
+        let first_rows = HashMap::from([(first.ledger_path.clone(), first)]);
+        let second = current_repo_row("completed", "second");
+        let second_rows = HashMap::from([(second.ledger_path.clone(), second)]);
+
+        emit_subscription_snapshot(
+            &snapshots,
+            &mut state,
+            &first_rows,
+            None,
+            Some(&mut persistence),
+        )
+        .expect("first snapshot");
+        let _ = results.recv().expect("first rendered snapshot");
+        emit_subscription_snapshot(
+            &snapshots,
+            &mut state,
+            &second_rows,
+            None,
+            Some(&mut persistence),
+        )
+        .expect("second snapshot");
+        let _ = results.recv().expect("second rendered snapshot");
+
+        let cached = sessions_cache::read_snapshot(&cache_root).expect("persisted cache");
+        assert_eq!(cached.sessions[0].title.as_deref(), Some("first"));
+
+        persistence.flush(&state);
+        let cached = sessions_cache::read_snapshot(&cache_root).expect("flushed cache");
+        assert_eq!(cached.sessions[0].title.as_deref(), Some("second"));
+    }
+
+    #[test]
+    fn sessions_cache_write_failure_is_invisible() {
+        let (snapshots, results) = mpsc::channel();
+        let mut state = State::new_without_worker();
+        let cache_root = sessions_cache_scratch_root();
+        std::fs::write(cache_root.as_std_path(), b"not a directory").unwrap();
+        state.sessions_cache_root = Some(cache_root);
+        let center_row = current_repo_row("completed", "still visible");
+        let rows = HashMap::from([(center_row.ledger_path.clone(), center_row)]);
+        let mut persistence = SessionsCachePersistence::new();
+
+        assert!(emit_subscription_snapshot(
+            &snapshots,
+            &mut state,
+            &rows,
+            None,
+            Some(&mut persistence),
+        )
+        .expect("cache failure does not reject snapshot"));
+        let snapshot = results
+            .recv()
+            .expect("rendered snapshot")
+            .expect("snapshot success");
+        assert_eq!(snapshot.sessions[0].title.as_deref(), Some("still visible"));
+    }
+
     fn parked_ask_row(title: &str) -> ctx_traits_io::center::CenterPublicRow {
         let mut value = serde_json::to_value(current_repo_row("waiting-on-human", title))
             .expect("encode center row");
@@ -896,6 +1109,7 @@ mod tests {
             &mut state,
             &rows,
             false,
+            None,
         )
         .expect("emit empty snapshot");
 
@@ -922,7 +1136,7 @@ mod tests {
         let center_row = row("awaiting-agent-output", "parked title");
         let rows = HashMap::from([(center_row.ledger_path.clone(), center_row)]);
 
-        emit_subscription_snapshot(&snapshots, &mut state, &rows, None)
+        emit_subscription_snapshot(&snapshots, &mut state, &rows, None, None)
             .expect("seed subscription snapshot");
         let _ = results
             .recv()
@@ -938,6 +1152,7 @@ mod tests {
             &mut state,
             &rows,
             false,
+            None,
         )
         .expect("emit command snapshot");
 
@@ -974,6 +1189,7 @@ mod tests {
             &mut state,
             &rows,
             false,
+            None,
         )
         .expect("commands remain serviceable during retry");
 
@@ -1215,6 +1431,7 @@ mod tests {
             &mut state,
             &rows,
             false,
+            None,
         )
         .expect("render accepted rows");
         let snapshot = results
@@ -1299,7 +1516,7 @@ mod tests {
 
         let (snapshots, results) = mpsc::channel();
         let mut state = State::new_without_worker();
-        emit_subscription_snapshot(&snapshots, &mut state, &rows, changed_ledger_path)
+        emit_subscription_snapshot(&snapshots, &mut state, &rows, changed_ledger_path, None)
             .expect("emit activity snapshot");
         assert_eq!(
             results
@@ -1331,7 +1548,7 @@ mod tests {
                 row: Box::new(completed.clone()),
             },
         );
-        emit_subscription_snapshot(&snapshots, &mut worker_state, &rows, None)
+        emit_subscription_snapshot(&snapshots, &mut worker_state, &rows, None, None)
             .expect("emit terminal snapshot");
         let terminal = results
             .recv()
@@ -1352,7 +1569,7 @@ mod tests {
                 row: Box::new(completed),
             },
         );
-        emit_subscription_snapshot(&snapshots, &mut worker_state, &rows, None)
+        emit_subscription_snapshot(&snapshots, &mut worker_state, &rows, None, None)
             .expect("emit removal snapshot");
         let removed = results
             .recv()
