@@ -636,7 +636,7 @@ fn wait_for_retry(
                 state,
                 rows,
                 clear_refresh_error,
-                sessions_cache,
+                sessions_cache.as_deref_mut(),
             )?,
             Err(mpsc::RecvTimeoutError::Timeout) => return Ok(()),
             Err(mpsc::RecvTimeoutError::Disconnected) => return Err(()),
@@ -654,7 +654,7 @@ fn handle_one_command(
     state: &mut State,
     rows: &HashMap<String, ctx_traits_io::center::CenterPublicRow>,
     clear_refresh_error: bool,
-    mut sessions_cache: Option<&mut SessionsCachePersistence>,
+    sessions_cache: Option<&mut SessionsCachePersistence>,
 ) -> Result<(), ()> {
     match command {
         Command::Explain(request) => explanations.send(explain(request)).map_err(|_| ()),
@@ -688,7 +688,7 @@ fn handle_one_command(
                 state,
                 rows,
                 clear_refresh_error,
-                sessions_cache.as_deref_mut(),
+                sessions_cache,
             )?;
             if !accepted {
                 state.all_repos = previous_scope;
