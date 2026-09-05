@@ -452,6 +452,21 @@ fn same_repeated_control(left: &RepeatedActivation, right: &RepeatedActivation) 
     left.kind == right.kind && left.id == right.id && left.owner_path == right.owner_path
 }
 
+/// The innermost active loop's own clock: the run's cumulative active-drive
+/// seconds minus the reading taken when that loop frame was activated.
+/// `None` when no loop frame is active or the innermost one carries no
+/// reading (a ledger written before the clock existed) — missing evidence,
+/// which the `loop-elapsed-seconds-at-least` guard reports as unmeasurable.
+fn innermost_loop_elapsed_seconds(state: &State) -> Option<u64> {
+    state
+        .control_stack
+        .iter()
+        .rev()
+        .find(|frame| frame.kind == ControlKind::Loop)
+        .and_then(|frame| frame.loop_started_elapsed_seconds)
+        .map(|started| state.elapsed_seconds.saturating_sub(started))
+}
+
 fn evaluate_guard_predicate(
     trait_ref: &Trait,
     state: &State,
@@ -616,13 +631,7 @@ fn evaluate_guard_predicate(
         // existed) is missing evidence, not a false fact: unmeasurable,
         // routes false, so an old ledger's loop keeps running on its other
         // exits rather than ending on a clock nobody started.
-        let started = state
-            .control_stack
-            .iter()
-            .rev()
-            .find(|frame| frame.kind == ControlKind::Loop)
-            .and_then(|frame| frame.loop_started_elapsed_seconds);
-        let Some(started) = started else {
+        let Some(loop_elapsed) = innermost_loop_elapsed_seconds(state) else {
             return Ok((
                 GuardOutcome::Unmeasurable,
                 vec![condition_evaluation_outcome(
@@ -635,7 +644,7 @@ fn evaluate_guard_predicate(
             ));
         };
         let lhs = ComparisonOperandEvidence::Literal {
-            value: JsonValue::from(state.elapsed_seconds.saturating_sub(started)),
+            value: JsonValue::from(loop_elapsed),
         };
         let rhs = if let Some(ref_text) = crate::r#trait::condition::numeric_comparison_ref(threshold)
         {
@@ -1785,6 +1794,51 @@ mod present_tests {
             field: Some(field.to_string()),
             ..Default::default()
         }
+    }
+
+    fn control_frame(json: serde_json::Value) -> crate::procedure::runtime::ControlFrame {
+        serde_json::from_value(json).expect("control frame")
+    }
+
+    #[test]
+    fn loop_clock_reads_from_the_innermost_loop_frame() {
+        let mut state = state_with_port_values(Vec::new());
+        state.elapsed_seconds = 500;
+        state.control_stack = vec![
+            control_frame(serde_json::json!({
+                "kind": "loop", "parent-run-index": 0, "sequence-id": "outer",
+                "next-index": 0, "loop-started-elapsed-seconds": 20
+            })),
+            control_frame(serde_json::json!({
+                "kind": "branch", "parent-run-index": 0, "sequence-id": "arm", "next-index": 0
+            })),
+            control_frame(serde_json::json!({
+                "kind": "loop", "parent-run-index": 0, "sequence-id": "inner",
+                "next-index": 0, "loop-started-elapsed-seconds": 200
+            })),
+        ];
+        assert_eq!(innermost_loop_elapsed_seconds(&state), Some(300));
+        state.control_stack.pop();
+        state.control_stack.pop();
+        assert_eq!(innermost_loop_elapsed_seconds(&state), Some(480));
+    }
+
+    #[test]
+    fn loop_clock_without_a_reading_or_a_loop_is_missing_evidence() {
+        let mut state = state_with_port_values(Vec::new());
+        state.elapsed_seconds = 500;
+        assert_eq!(innermost_loop_elapsed_seconds(&state), None);
+        state.control_stack = vec![control_frame(serde_json::json!({
+            "kind": "loop", "parent-run-index": 0, "sequence-id": "legacy", "next-index": 0
+        }))];
+        assert_eq!(innermost_loop_elapsed_seconds(&state), None);
+        // A reading ahead of the run clock (a resumed ledger) reads as zero,
+        // never as a wrapped-around eternity.
+        state.control_stack = vec![control_frame(serde_json::json!({
+            "kind": "loop", "parent-run-index": 0, "sequence-id": "ahead",
+            "next-index": 0, "loop-started-elapsed-seconds": 900
+        }))];
+        assert_eq!(innermost_loop_elapsed_seconds(&state), Some(0));
     }
 
     #[test]

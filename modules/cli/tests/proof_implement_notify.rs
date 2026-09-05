@@ -72,6 +72,22 @@ fn argv_of(canonical: &toml::Table, wanted: &str) -> Vec<String> {
     panic!("step {wanted} not found in any sequence pool");
 }
 
+/// The named sequence pool (loop body or branch arm) that holds the step
+/// `wanted` — the stage loop nests its work under a stage-open arm, so a
+/// site's neighbourhood is found by its step, not by a fixed pool name.
+fn pool_containing<'a>(canonical: &'a toml::Table, wanted: &str) -> Vec<&'a str> {
+    let named = canonical
+        .get("sequence")
+        .and_then(toml::Value::as_table)
+        .expect("named sequences");
+    named
+        .values()
+        .filter_map(|sub| sub.get("sequence").and_then(toml::Value::as_array))
+        .map(|items| ids(items))
+        .find(|items| items.contains(&wanted))
+        .unwrap_or_else(|| panic!("no named sequence contains {wanted}"))
+}
+
 #[test]
 fn narration_sits_at_the_contract_sites_in_order() {
     let canonical = basic_canonical();
@@ -92,8 +108,13 @@ fn narration_sits_at_the_contract_sites_in_order() {
         "notify-session-base",
         "status announces the step it precedes"
     );
-    let draft = index_of(&top_ids, "draft-the-implementation-plan");
-    assert_eq!(top_ids[draft - 1], "notify-plan-drafted");
+    // The plan is drafted inside the plan-approval loop; the status line
+    // announces the loop that contains it.
+    let plan = index_of(&top_ids, "plan-approval");
+    assert_eq!(top_ids[plan - 1], "notify-plan-drafted");
+    let review_baseline = index_of(&top_ids, "review-the-tree-before-any-work");
+    assert_eq!(top_ids[review_baseline - 1], "notify-baseline-review");
+    assert!(index_of(&top_ids, "stage-loop") > review_baseline);
     let finish = index_of(&top_ids, "notify-finish");
     assert!(finish > index_of(&top_ids, "maybe-commit"));
     assert_eq!(
@@ -102,47 +123,43 @@ fn narration_sits_at_the_contract_sites_in_order() {
         "finish closes the run: {top_ids:?}"
     );
 
-    let body = canonical
-        .get("sequence")
-        .and_then(|s| s.get("reviewed-refinement-body"))
-        .and_then(|s| s.get("sequence"))
-        .and_then(toml::Value::as_array)
-        .expect("reviewed-refinement-body.sequence");
-    let body_ids = ids(body);
-    let implement = index_of(&body_ids, "implement-the-task");
+    // The stage-open arm: one status line announces the work loop, and the
+    // review round's narration follows the review step in contract order,
+    // before the annotate gate and the ruling branch.
+    let arm_ids = pool_containing(&canonical, "review-the-claim");
+    let work = index_of(&arm_ids, "work-the-stage");
     assert_eq!(
-        body_ids[implement - 1],
-        "notify-implement-pass",
-        "status announces the pass it precedes"
+        arm_ids[work - 1],
+        "notify-working-the-stage",
+        "status announces the work loop it precedes"
     );
-    let review = index_of(&body_ids, "review-the-implementation");
-    assert_eq!(body_ids[review + 1], "notify-digest-verdict");
-    assert_eq!(body_ids[review + 2], "notify-carry-digest");
-    assert_eq!(body_ids[review + 3], "notify-review-update");
-    assert_eq!(body_ids[review + 4], "notify-review-journal");
-    assert_eq!(body_ids[review + 5], "notify-awaiting-annotations");
-    assert_eq!(body_ids[review + 6], "gate-carry-surface");
-    assert_eq!(body_ids[review + 7], "owner-verdict-gate");
-    assert_eq!(body_ids[review + 8], "record-the-owner-ruling");
-    assert_eq!(body_ids[review + 9], "notify-gate-result");
+    let review = index_of(&arm_ids, "review-the-claim");
+    assert_eq!(arm_ids[review + 1], "notify-digest-verdict");
+    assert_eq!(arm_ids[review + 2], "notify-carry-digest");
+    assert_eq!(arm_ids[review + 3], "notify-review-update");
+    assert_eq!(arm_ids[review + 4], "notify-review-journal");
+    assert_eq!(arm_ids[review + 5], "notify-awaiting-annotations");
+    assert_eq!(arm_ids[review + 6], "gate-carry-surface");
+    assert_eq!(arm_ids[review + 7], "owner-verdict-gate");
+    assert_eq!(arm_ids[review + 8], "record-the-owner-ruling");
+    assert_eq!(arm_ids[review + 9], "notify-gate-result");
     assert!(
-        index_of(&body_ids, "owner-ruling") > review + 9,
+        index_of(&arm_ids, "owner-ruling") > review + 9,
         "narration and the annotate gate precede the ruling branch"
     );
 
-    let named = canonical
-        .get("sequence")
-        .and_then(toml::Value::as_table)
-        .expect("named sequences");
-    let commit_arm = named
-        .values()
-        .filter_map(|sub| sub.get("sequence").and_then(toml::Value::as_array))
-        .find(|items| ids(items).contains(&"commit-the-work"))
-        .expect("an arm containing commit-the-work");
-    let arm_ids = ids(commit_arm);
+    // Both commit phases are announced on entry: the stage commit right
+    // after the closed stage is carried, the final commit first thing.
+    let stage_commit = pool_containing(&canonical, "commit-the-stage");
     assert_eq!(
-        arm_ids[0], "notify-committed",
-        "commit phase announced on entry: {arm_ids:?}"
+        stage_commit[0], "carry-closed-stage",
+        "stage commit arm: {stage_commit:?}"
+    );
+    assert_eq!(stage_commit[1], "notify-stage-committed");
+    let commit_arm = pool_containing(&canonical, "commit-the-work");
+    assert_eq!(
+        commit_arm[0], "notify-committed",
+        "commit phase announced on entry: {commit_arm:?}"
     );
 }
 
@@ -158,8 +175,10 @@ fn every_notification_is_one_bare_argv_with_no_embedded_program() {
     for update_id in [
         "notify-session-base",
         "notify-plan-drafted",
-        "notify-implement-pass",
+        "notify-baseline-review",
+        "notify-working-the-stage",
         "notify-awaiting-annotations",
+        "notify-stage-committed",
         "notify-committed",
     ] {
         let argv = argv_of(&canonical, update_id);

@@ -270,6 +270,20 @@ mod describe_tests {
     }
 
     #[test]
+    fn clock_predicates_name_their_clock() {
+        let run = GuardExpr::Predicate(Box::new(GuardPredicate {
+            elapsed_seconds_at_least: Some(serde_json::json!(60)),
+            ..GuardPredicate::default()
+        }));
+        assert_eq!(run.describe(), "elapsed-seconds >= 60");
+        let stage = GuardExpr::Predicate(Box::new(GuardPredicate {
+            loop_elapsed_seconds_at_least: Some(serde_json::json!(14400)),
+            ..GuardPredicate::default()
+        }));
+        assert_eq!(stage.describe(), "loop-elapsed-seconds >= 14400");
+    }
+
+    #[test]
     fn compositions_read_as_all_any_and_not() {
         let all = GuardExpr::Predicate(Box::new(GuardPredicate {
             all: vec![

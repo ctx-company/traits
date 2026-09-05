@@ -2151,11 +2151,17 @@ fn input_field_spec_entries(
     let Some(schema_ref) = schema_ref else {
         return;
     };
-    push_schema_field_spec_entries(trait_ref, &schema_ref, id, INPUT_FIELD_SPEC_DEPTH, entries);
+    push_schema_field_spec_entries(
+        &trait_ref.schemas,
+        &schema_ref,
+        id,
+        INPUT_FIELD_SPEC_DEPTH,
+        entries,
+    );
 }
 
 fn push_schema_field_spec_entries(
-    trait_ref: &ctx_traits_core::r#trait::Trait,
+    schemas: &[ctx_traits_core::r#trait::schema::Schema],
     schema_ref: &str,
     prefix: &str,
     depth: usize,
@@ -2167,8 +2173,7 @@ fn push_schema_field_spec_entries(
     let Some(schema_id) = schema_ref.strip_prefix("schema:") else {
         return;
     };
-    let Some(fields) = trait_ref
-        .schemas
+    let Some(fields) = schemas
         .iter()
         .find(|schema| schema.id == schema_id)
         .and_then(|schema| schema.fields.as_ref())
@@ -2194,7 +2199,109 @@ fn push_schema_field_spec_entries(
                 hint,
             });
         }
-        push_schema_field_spec_entries(trait_ref, &field.schema, &id, depth - 1, entries);
+        push_schema_field_spec_entries(schemas, &field.schema, &id, depth - 1, entries);
+    }
+}
+
+#[cfg(test)]
+mod input_field_spec_tests {
+    use super::{INPUT_FIELD_SPEC_DEPTH, push_schema_field_spec_entries, spec_block};
+    use ctx_traits_core::r#trait::schema::Schema;
+
+    fn schemas() -> Vec<Schema> {
+        let brief = toml::from_str::<Schema>(
+            r#"
+id = "brief"
+description = "The worker's next unit of work."
+[fields.step]
+schema = "schema:text"
+required = true
+description = "The front step: where the worker starts."
+[fields.remaining]
+schema = "schema:integer"
+required = true
+hint = "A count, never their text."
+[fields.stage]
+schema = "schema:stage-ref"
+required = true
+description = "The stage this brief belongs to."
+[fields.silent]
+schema = "schema:text"
+required = false
+"#,
+        )
+        .expect("brief schema");
+        let stage = toml::from_str::<Schema>(
+            r#"
+id = "stage-ref"
+[fields.id]
+schema = "schema:text"
+required = true
+description = "The stage id."
+[fields.deeper]
+schema = "schema:stage-ref"
+required = false
+description = "Recursion stops at the depth bound, never here."
+"#,
+        )
+        .expect("stage schema");
+        vec![brief, stage]
+    }
+
+    #[test]
+    fn described_fields_become_spec_children_named_by_path() {
+        let mut entries = Vec::new();
+        push_schema_field_spec_entries(
+            &schemas(),
+            "schema:brief",
+            "brief",
+            INPUT_FIELD_SPEC_DEPTH,
+            &mut entries,
+        );
+        let ids: Vec<&str> = entries.iter().map(|entry| entry.id.as_str()).collect();
+        // Declaration order is the map's key order; nested object fields
+        // follow their parent; a field with neither description nor hint is
+        // silent; recursion stops after one nested level.
+        assert_eq!(
+            ids,
+            vec![
+                "brief.remaining",
+                "brief.stage",
+                "brief.stage.deeper",
+                "brief.stage.id",
+                "brief.step"
+            ]
+        );
+        let rendered = spec_block(&entries, 2);
+        assert!(
+            rendered.contains("<brief.step>The front step: where the worker starts.</brief.step>")
+        );
+        assert!(
+            rendered.contains(
+                "<brief.remaining hint=\"A count, never their text.\"></brief.remaining>"
+            )
+        );
+        assert!(!rendered.contains("brief.stage.deeper.id"));
+    }
+
+    #[test]
+    fn a_scalar_or_unknown_schema_contributes_nothing() {
+        let mut entries = Vec::new();
+        push_schema_field_spec_entries(
+            &schemas(),
+            "schema:text",
+            "note",
+            INPUT_FIELD_SPEC_DEPTH,
+            &mut entries,
+        );
+        push_schema_field_spec_entries(
+            &schemas(),
+            "schema:missing",
+            "gone",
+            INPUT_FIELD_SPEC_DEPTH,
+            &mut entries,
+        );
+        assert!(entries.is_empty());
     }
 }
 
