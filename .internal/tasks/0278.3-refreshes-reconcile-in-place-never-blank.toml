@@ -3,7 +3,7 @@ key = "0278.3"
 title = "Refreshes reconcile in place: no pane blanks and refills"
 status = "ready"
 raised = "2026-09-03"
-content = '''
+content = """
 This plan separates GOALS from APPROACH. The GOALS section is binding: each
 names an observable outcome, what decides it, and what it excludes. The
 APPROACH section is the architect's suggested route — files, symbols, edit
@@ -81,8 +81,8 @@ of swapping content in place. This is the observed mid-session flash.
 4. **Existing retention and selection suites stay green.** Unchanged-snapshot
    and unrelated-event retention, identity-stable selection, worker rollback
    and reconnect tests all pass; decided by the declared checks.
-'''
-scope = '''
+"""
+scope = """
 ## Decisions
 
 - Reuse, never duplicate: the in-place path is worker `preview` +
@@ -109,8 +109,8 @@ scope = '''
 5. Gates: `CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --lib
    dashboard`, then `just test`. Isolate the build cache
    (`CARGO_TARGET_DIR=target`) in a run worktree before trusting a failure.
-'''
-validation = '''
+"""
+validation = """
 ## Watch
 
 - Stale replacements for a changed selection must still be rejected
@@ -126,7 +126,7 @@ validation = '''
   pending marker, and the activity-only no-reprojection behavior are each
   asserted by the dashboard lib suite, with the old clearing test rewritten.
 - The dashboard lib suite and `just test` are green.
-'''
+"""
 
 [relations]
 parent = "0278"
