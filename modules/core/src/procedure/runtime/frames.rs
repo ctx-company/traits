@@ -60,6 +60,11 @@ pub struct CommandFrame {
         skip_serializing_if = "Option::is_none"
     )]
     pub idle_timeout_ms: Option<u64>,
+    /// See [`crate::r#trait::procedure::CommandPlan::terminal`]: the child
+    /// takes the terminal, so a live run pane parks its input pump while
+    /// this frame runs.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub terminal: bool,
     /// See [`crate::r#trait::procedure::CommandPlan::capture_bytes`].
     #[serde(
         default,

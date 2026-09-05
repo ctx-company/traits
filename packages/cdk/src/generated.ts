@@ -590,6 +590,10 @@ export type CanonicalCommandDeclaration = {
    */
   readonly "success-exit-code"?: readonly number[] | undefined;
   /**
+   * See [`CommandPlan::terminal`]: the command takes the terminal.
+   */
+  readonly "terminal"?: boolean | undefined;
+  /**
    * Runtime timeout in milliseconds.
    */
   readonly "timeout-ms"?: number | undefined;

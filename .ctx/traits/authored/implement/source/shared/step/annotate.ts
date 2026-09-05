@@ -63,6 +63,7 @@ export function verdictGate(title: string): void {
     output: gateAnswer,
     timeoutMs: GATE_CEILING_MS,
     idleTimeoutMs: GATE_CEILING_MS,
+    terminal: true,
   });
 }
 
@@ -111,6 +112,7 @@ export function planApprovalGate(title: string): void {
     output: planAnswer,
     timeoutMs: GATE_CEILING_MS,
     idleTimeoutMs: GATE_CEILING_MS,
+    terminal: true,
   });
 }
 
@@ -136,6 +138,7 @@ export function treeGate(title: string): void {
     output: annotations,
     timeoutMs: GATE_CEILING_MS,
     idleTimeoutMs: GATE_CEILING_MS,
+    terminal: true,
   });
 }
 

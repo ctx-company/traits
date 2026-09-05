@@ -338,6 +338,12 @@ export type CommandSequenceFields = Omit<SequenceCommonFields, "input"> & {
   readonly behavior?: never;
   readonly kind?: "command";
   readonly executableDigestFrom?: PortHandle<string> | SlotHandle<string>;
+  /** The command takes the terminal: an interactive child (an annotation
+   * gate, an editor) that reads the keyboard itself. While it runs with the
+   * run pane live, the pane's input pump is parked so every keystroke
+   * reaches the child. Leave unset for an ordinary command such as a test
+   * suite, whose frame keeps the pane's quit/detach/kill keys live. */
+  readonly terminal?: boolean;
   /** Non-interpolated dependencies for this step — including
    * `input.optional(...)` markers — that the step's argv does not itself
    * reference. Honored on every argv source (`cmd`, `argv`, `argvFrom`,
@@ -1610,6 +1616,7 @@ function sequenceOf(fields: SequenceFields): SequenceHandle {
           : refText(commandFields.executableDigestFrom, `sequence.${fields.id}.executableDigestFrom`),
       "timeout-ms": fields.timeoutMs ?? fields.timeout,
       "idle-timeout-ms": fields.idleTimeoutMs,
+      terminal: commandFields?.terminal === true ? true : undefined,
       "success-exit-code":
         fields.successExitCode === undefined
           ? undefined

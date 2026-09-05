@@ -1135,6 +1135,7 @@ esac""",
 ]
 timeout-ms = 14400000
 idle-timeout-ms = 14400000
+terminal = true
 
 [[sequence.ctx-branch-arm-s-15-stage-loop-body-10-stage-open-then.sequence]]
 id = "record-the-owner-ruling"
@@ -1432,6 +1433,7 @@ esac""",
 ]
 timeout-ms = 14400000
 idle-timeout-ms = 14400000
+terminal = true
 
 [[sequence.plan-approval-body.sequence]]
 id = "record-the-owner-s-plan-correction"

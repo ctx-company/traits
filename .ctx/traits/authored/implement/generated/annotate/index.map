@@ -211,8 +211,8 @@
   },
   "sequence:procedure/owner-tree-annotate": {
     "file": ".ctx/traits/authored/implement/source/shared/step/annotate.ts",
-    "start": 133,
-    "end": 133
+    "start": 135,
+    "end": 135
   },
   "sequence:stage-loop-body/stage-open": {
     "file": ".ctx/traits/authored/implement/source/variant/annotate/index.ts",

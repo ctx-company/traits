@@ -250,6 +250,7 @@ fn validate_port_default_command(command: &PortDefaultCommand, base: &str) -> cr
                 cwd: command.cwd.clone(),
                 timeout_ms: command.timeout_ms,
                 idle_timeout_ms: None,
+                terminal: false,
                 capture_bytes: command.capture_bytes,
                 success_exit_code: Vec::new(),
             };

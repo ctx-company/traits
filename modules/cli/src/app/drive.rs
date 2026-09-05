@@ -2434,13 +2434,19 @@ fn drive_loop(
             refresh_run_panel(&mut run_panel.0, &mut input, &outcome.session);
             command_started_event(&outcome.session, run_panel.0.is_some());
             let revisions_before = outcome.session.slot_revisions.len();
-            // 0281.4: the command child owns the terminal's keys for as long
-            // as it runs — the pane's input pump is parked (the `$EDITOR`
-            // switch), so an interactive gate reads every keystroke itself
-            // and a ctrl-c typed into it is the child's own cancel, never
-            // P551's instant kill of the child. Harness frames keep the
-            // live pump and the instant-kill rule.
-            let advanced = with_input_paused(run_panel.0.as_ref(), || {
+            // 0281.4: a command that declares it takes the terminal (an
+            // annotation gate) owns the keys for as long as it runs — the
+            // pane's input pump is parked (the `$EDITOR` switch), so the
+            // interactive child reads every keystroke itself and a ctrl-c
+            // typed into it is the child's own cancel, never P551's instant
+            // kill of the child. Every other command frame (a test suite, a
+            // proof) keeps the pane's quit/detach/kill keys live, and
+            // harness frames keep the live pump and the instant-kill rule.
+            let pane_to_park = run_panel
+                .0
+                .as_ref()
+                .filter(|_| terminal_command_frame(outcome.session.next_frame.as_deref()));
+            let advanced = with_input_paused(pane_to_park, || {
                 ctx_traits_io::run::advance_commands(ctx_traits_io::run::AdvanceCommandsRequest {
                     trait_file: input.file,
                     trait_id: None,
@@ -10509,6 +10515,18 @@ fn record_out_of_tree_mutation(
 /// park. The pump resumes the instant `body` returns — on every path,
 /// including a panic unwinding through it — so the very next harness frame
 /// gets the live pump and P551's instant-kill rule back unchanged.
+/// Whether the frame about to run is a command that declared it takes the
+/// terminal — the only kind of frame the run pane hands its keys to. The
+/// non-terminal side is proven end to end by the exit-teardown suite's
+/// q-detach case, which presses `q` during an ordinary command frame.
+fn terminal_command_frame(
+    frame: Option<&ctx_traits_core::procedure::runtime::SequenceFrame>,
+) -> bool {
+    frame
+        .and_then(|frame| frame.command.as_ref())
+        .is_some_and(|command| command.terminal)
+}
+
 fn with_input_paused<R>(run_panel: Option<&run_view::RunPanel>, body: impl FnOnce() -> R) -> R {
     let _input_pause = run_panel.and_then(run_view::RunPanel::pause_input);
     body()

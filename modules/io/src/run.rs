@@ -4630,6 +4630,7 @@ mod resolve_command_bounds_tests {
             cwd: None,
             timeout_ms,
             idle_timeout_ms,
+            terminal: false,
             capture_bytes: None,
             success_exit_code: Vec::new(),
             output_slot: "slot:gate".to_string(),

@@ -613,6 +613,15 @@ pub struct CommandPlan {
     )]
     pub idle_timeout_ms: Option<u64>,
 
+    /// The command takes the terminal (0281.4/0281.7): an interactive child
+    /// such as an annotation gate that reads the keyboard itself. While it
+    /// runs with the run pane live, the pane's input pump is parked so every
+    /// keystroke reaches the child and a ctrl-c typed into it is the child's
+    /// own cancel. False (the default) keeps the pane's keys — quit, detach,
+    /// kill — live during an ordinary command such as a test suite.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub terminal: bool,
+
     /// Runtime stdout capture ceiling in bytes. A capture that exceeds this
     /// fails the step rather than landing a truncated value in the slot
     /// ledger (IO/CLI adapters own the actual refusal; core only carries the
@@ -676,6 +685,10 @@ pub struct CommandDeclaration {
         skip_serializing_if = "Option::is_none"
     )]
     pub idle_timeout_ms: Option<u64>,
+
+    /// See [`CommandPlan::terminal`]: the command takes the terminal.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub terminal: bool,
 
     /// See [`CommandPlan::capture_bytes`].
     #[serde(

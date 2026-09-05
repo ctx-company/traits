@@ -56,8 +56,8 @@
   },
   "prompt:plan-digest": {
     "file": ".ctx/traits/authored/implement/source/shared/step/annotate.ts",
-    "start": 91,
-    "end": 91
+    "start": 92,
+    "end": 92
   },
   "prompt:record-the-owner-s-ruling": {
     "file": ".ctx/traits/authored/implement/source/shared/step/summon.ts",
@@ -261,8 +261,8 @@
   },
   "sequence:ctx-branch-arm-s-15-stage-loop-body-10-stage-open-then/record-the-owner-ruling": {
     "file": ".ctx/traits/authored/implement/source/shared/step/annotate.ts",
-    "start": 72,
-    "end": 72
+    "start": 73,
+    "end": 73
   },
   "sequence:ctx-branch-arm-s-15-stage-loop-body-10-stage-open-then/review-the-claim": {
     "file": ".ctx/traits/authored/implement/source/variant/basic/index.ts",
@@ -281,8 +281,8 @@
   },
   "sequence:ctx-branch-arm-s-18-plan-approval-body-34-record-the-owner-s-plan-correction-then/plan-append-ruling": {
     "file": ".ctx/traits/authored/implement/source/shared/step/annotate.ts",
-    "start": 149,
-    "end": 149
+    "start": 152,
+    "end": 152
   },
   "sequence:ctx-branch-arm-s-19-work-the-stage-body-7-claimed-then/prove-the-claim": {
     "file": ".ctx/traits/authored/implement/source/shared/step/proof.ts",
@@ -331,8 +331,8 @@
   },
   "sequence:ctx-branch-arm-s-54-ctx-branch-arm-s-15-stage-loop-body-10-stage-open-then-23-record-the-owner-ruling-then/gate-append-ruling": {
     "file": ".ctx/traits/authored/implement/source/shared/step/annotate.ts",
-    "start": 76,
-    "end": 76
+    "start": 77,
+    "end": 77
   },
   "sequence:ctx-branch-arm-s-95-ctx-branch-arm-s-54-ctx-branch-arm-s-15-stage-loop-body-10-stage-open-then-12-owner-ruling-then-15-owner-reachable-then/record-the-owner-s-ruling": {
     "file": ".ctx/traits/authored/implement/source/variant/basic/index.ts",
@@ -351,23 +351,23 @@
   },
   "sequence:plan-approval-body/owner-plan-gate": {
     "file": ".ctx/traits/authored/implement/source/shared/step/annotate.ts",
-    "start": 108,
-    "end": 108
+    "start": 109,
+    "end": 109
   },
   "sequence:plan-approval-body/plan-carry-surface": {
     "file": ".ctx/traits/authored/implement/source/shared/step/annotate.ts",
-    "start": 101,
-    "end": 101
+    "start": 102,
+    "end": 102
   },
   "sequence:plan-approval-body/plan-digest": {
     "file": ".ctx/traits/authored/implement/source/shared/step/annotate.ts",
-    "start": 88,
-    "end": 88
+    "start": 89,
+    "end": 89
   },
   "sequence:plan-approval-body/record-the-owner-s-plan-correction": {
     "file": ".ctx/traits/authored/implement/source/shared/step/annotate.ts",
-    "start": 145,
-    "end": 145
+    "start": 148,
+    "end": 148
   },
   "sequence:procedure/capture-the-session-base": {
     "file": ".ctx/traits/authored/implement/source/variant/basic/index.ts",

@@ -1552,6 +1552,7 @@ mod tests {
             cwd: None,
             timeout_ms: None,
             idle_timeout_ms: None,
+            terminal: false,
             capture_bytes: None,
             success_exit_code: vec![3],
         });

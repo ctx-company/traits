@@ -961,6 +961,7 @@ esac""",
 ]
 timeout-ms = 14400000
 idle-timeout-ms = 14400000
+terminal = true
 
 [[procedure.sequence]]
 id = "owner-annotated"
