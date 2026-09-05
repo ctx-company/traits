@@ -16246,7 +16246,9 @@ fn dashboard_guide_tokens_compact_labels_survive_token_column_width() {
 #[test]
 fn renderer_thread_guard_rejects_a_registered_thread() {
     set_renderer_thread_for_test(Some(std::thread::current().id()));
-    let result = std::panic::catch_unwind(assert_off_renderer_thread);
+    let result = std::panic::catch_unwind(|| {
+        let _ = board_fingerprint(camino::Utf8Path::new("guard-test-unused"));
+    });
     set_renderer_thread_for_test(None);
     assert!(
         result.is_err(),
