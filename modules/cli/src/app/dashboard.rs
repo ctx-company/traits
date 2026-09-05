@@ -9679,7 +9679,7 @@ mod tests {
         let (progress_lines, _) = sessions_preview_pane_lines(&state);
 
         assert!(!progress_lines.is_empty());
-        assert_ne!(progress_lines, vec![labeled_dim_line("(loading preview…")]);
+        assert_ne!(progress_lines, vec![labeled_dim_line("(loading preview…)")]);
     }
 
     #[test]
