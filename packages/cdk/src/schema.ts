@@ -58,6 +58,27 @@ export type SchemaObjectField = SchemaValue | SchemaEnumSpec | SchemaFieldFields
 export type SchemaObjectFields = Record<string, SchemaObjectField>;
 
 /**
+ * Cross-revision identity and immutability for a `schema.object`'s items
+ * when they appear in a list slot value: `key` names the field that
+ * identifies one item across revisions of the same slot, `fields` the fields
+ * a matched item may set once and never change afterwards. The Rust runtime
+ * rejects a submission that edits or removes a frozen field on a matched
+ * item, the same way it rejects a schema violation; items whose key has no
+ * match in the previous revision are new and unchecked.
+ * @example `schema.object("blocker-step", fields, { frozen: { key: "step", fields: ["done-when"] } })`
+ */
+export interface SchemaFrozenFields {
+  readonly key: string;
+  readonly fields?: readonly string[];
+}
+
+/** Options accepted by `schema.object`'s third argument. */
+export interface SchemaObjectOptions {
+  readonly description?: string;
+  readonly frozen?: SchemaFrozenFields;
+}
+
+/**
  * One `schema.object` field's normalized canonical JSON: what `schema.field`/
  * a bare schema value/an already-declared field lower to, and what an
  * object-schema handle's own enumerable surface holds one of per declared
@@ -289,7 +310,7 @@ export interface SchemaFunction {
   object<Fields extends SchemaObjectFields>(
     id: string,
     fields: Fields,
-    options?: { readonly description?: string },
+    options?: SchemaObjectOptions,
   ): SchemaObjectHandle<SchemaObjectValue<Fields>>;
   /**
    * Wraps a schema as one `schema.object` field, attaching
@@ -483,7 +504,7 @@ export const schema: SchemaFunction = {
   object: function object<Fields extends SchemaObjectFields>(
     id: string,
     fields: Fields,
-    options: { readonly description?: string } = {},
+    options: SchemaObjectOptions = {},
   ) {
     return schemaObject(id, fields, options);
   },
@@ -558,10 +579,11 @@ function schemaEnumDeclaration<const T extends readonly EnumLiteral[]>(
 function schemaObject<Fields extends SchemaObjectFields>(
   id: string,
   fields: Fields,
-  options: { readonly description?: string },
+  options: SchemaObjectOptions,
 ): SchemaObjectHandle<SchemaObjectValue<Fields>> {
   validateSlug(id, "schema.id");
   const normalizedFields = normalizedFieldRecords(fields, `schema.${id}.fields`);
+  const frozen = normalizedFrozenFields(options.frozen, Object.keys(normalizedFields), `schema.${id}.frozen`);
   // Two distinct top-level containers over the same per-field record
   // objects: `declaration.fields` is what's emitted as canonical JSON,
   // `publicSurface` is the handle's own enumerable surface (see
@@ -570,7 +592,7 @@ function schemaObject<Fields extends SchemaObjectFields>(
   // handle/publicSurface, would also land on `declaration.fields`, and a
   // trait walking `declaration` would collect the whole schema declaration
   // a second time from inside its own `fields` map.
-  const declaration = compact({ id, fields: { ...normalizedFields }, description: options.description });
+  const declaration = compact({ id, fields: { ...normalizedFields }, description: options.description, frozen });
   const declarations = collectMany(Object.values(normalizedFields));
   return withDeclaration<Record<string, SchemaFieldRecord>, "schema", SchemaObjectValue<Fields>>(
     "schema",
@@ -579,6 +601,41 @@ function schemaObject<Fields extends SchemaObjectFields>(
     { ...normalizedFields },
     { declarations },
   );
+}
+
+/**
+ * Lowers a `frozen` option to its canonical `{ key, fields }` JSON, checking
+ * every name against the object's declared field ids here rather than
+ * leaving a typo for the Rust manifest validator: the key must be a declared
+ * field, each frozen field must be a declared field other than the key, and
+ * no field is listed twice.
+ */
+function normalizedFrozenFields(
+  frozen: SchemaFrozenFields | undefined,
+  fieldIds: readonly string[],
+  fieldPath: string,
+): { readonly key: string; readonly fields: readonly string[] } | undefined {
+  if (frozen === undefined) return undefined;
+  const declared = new Set(fieldIds);
+  if (typeof frozen.key !== "string" || !declared.has(frozen.key)) {
+    throw new Error(`${fieldPath}.key: ${JSON.stringify(frozen.key)} is not a declared field`);
+  }
+  const fields = frozen.fields ?? [];
+  const seen = new Set<string>();
+  fields.forEach((fieldId, index) => {
+    if (typeof fieldId !== "string" || !declared.has(fieldId)) {
+      throw new Error(`${fieldPath}.fields[${index}]: ${JSON.stringify(fieldId)} is not a declared field`);
+    }
+    if (fieldId === frozen.key) {
+      throw new Error(
+        `${fieldPath}.fields[${index}]: ${JSON.stringify(fieldId)} is the key; the key identifies the item and is not itself frozen`,
+      );
+    }
+    if (seen.has(fieldId))
+      throw new Error(`${fieldPath}.fields[${index}]: duplicate frozen field ${JSON.stringify(fieldId)}`);
+    seen.add(fieldId);
+  });
+  return { key: frozen.key, fields: [...fields] };
 }
 
 /**
@@ -973,9 +1030,18 @@ function visitZodDefValue(raw: unknown, adapterPath: string, seen: Set<object>):
 
 type JsonSchemaObject = Record<string, JsonValue>;
 
+/**
+ * The one extension keyword the adapters accept: `x-frozen` on the top-level
+ * object schema lowers to the declaration's `frozen` option (see
+ * `SchemaFrozenFields`). A `toJsonSchema` adapter that cannot emit it (Zod's
+ * has no custom-keyword hook) attaches it to its own output:
+ * `toJsonSchema: (value) => ({ ...zodToJsonSchema(value), "x-frozen": { key: "step", fields: ["done-when"] } })`.
+ */
+const FROZEN_KEYWORD = "x-frozen";
+
 function schemaFromJsonSchema(id: string, source: unknown, adapterPath: string): SchemaHandle {
   validateSlug(id, "schema.id");
-  const jsonSchema = normalizeJsonSchema(source, adapterPath);
+  const { [FROZEN_KEYWORD]: frozenKeyword, ...jsonSchema } = normalizeJsonSchema(source, adapterPath);
   rejectUnsupportedKeywords(jsonSchema, adapterPath);
   const description = optionalString(jsonSchema.description, `${adapterPath}.description`);
   const type = jsonSchema.type;
@@ -988,7 +1054,14 @@ function schemaFromJsonSchema(id: string, source: unknown, adapterPath: string):
       validateSlug(fieldId, `${adapterPath}.properties.${fieldId}`);
       fields[fieldId] = jsonSchemaField(fieldSchema, `${adapterPath}.properties.${fieldId}`, required.has(fieldId));
     }
-    return schemaObject(id, fields, description === undefined ? {} : { description });
+    const frozen = frozenKeywordOption(frozenKeyword, `${adapterPath}.${FROZEN_KEYWORD}`);
+    return schemaObject(id, fields, {
+      ...(description === undefined ? {} : { description }),
+      ...(frozen === undefined ? {} : { frozen }),
+    });
+  }
+  if (frozenKeyword !== undefined) {
+    throw new Error(`${adapterPath}.${FROZEN_KEYWORD}: only object schemas carry identity across revisions`);
   }
 
   const schemaValue = jsonSchemaValue(jsonSchema, adapterPath);
@@ -997,6 +1070,22 @@ function schemaFromJsonSchema(id: string, source: unknown, adapterPath: string):
   if (typeof schemaValue !== "string") throw new Error(`${adapterPath}: scalar enums cannot use array schemas`);
   assertEnumMatchesSchema(allowed, schemaValue, `${adapterPath}.enum`);
   return schemaEnumDeclaration(id, allowed, description === undefined ? {} : { description });
+}
+
+function frozenKeywordOption(value: JsonValue | undefined, fieldPath: string): SchemaFrozenFields | undefined {
+  if (value === undefined) return undefined;
+  const object = requiredJsonObject(value, fieldPath);
+  for (const extra of Object.keys(object)) {
+    if (extra !== "key" && extra !== "fields") throw new Error(`${fieldPath}.${extra}: unsupported frozen keyword`);
+  }
+  const key = object.key;
+  if (typeof key !== "string") throw new Error(`${fieldPath}.key: expected a string`);
+  const fields = object.fields;
+  if (fields === undefined) return { key };
+  if (!Array.isArray(fields) || !fields.every((item) => typeof item === "string")) {
+    throw new Error(`${fieldPath}.fields: expected an array of strings`);
+  }
+  return { key, fields };
 }
 
 function jsonSchemaField(source: JsonValue, fieldPath: string, required: boolean): SchemaFieldFields {

@@ -870,6 +870,85 @@ describe("schema authoring sugar", () => {
     expect(() => schema.extend(a, b)).toThrow(/"shared"/);
   });
 
+  it("emits a schema.object frozen option as the declaration's frozen table", () => {
+    const step = schema.object(
+      "sugar-frozen-step",
+      {
+        step: schema.text(),
+        "done-when": schema.optional(schema.text()),
+        status: schema.text(),
+      },
+      { frozen: { key: "step", fields: ["done-when"] } },
+    );
+    const identityOnly = schema.object("sugar-frozen-blocker", { id: schema.text() }, { frozen: { key: "id" } });
+
+    const draft = toDraftJson(
+      trait({
+        id: "sugar-frozen",
+        name: "Sugar Frozen",
+        description: "Frozen fields reach the declaration.",
+        procedure: procedure({ description: "No steps.", sequence: [] }),
+        slot: [
+          slot({ id: "sugar-frozen-steps", schema: schema.list(step) }),
+          slot({ id: "sugar-frozen-blockers", schema: schema.list(identityOnly) }),
+        ],
+      }),
+    ) as { readonly schema?: readonly { readonly id: string; readonly frozen?: unknown }[] };
+
+    expect(draft.schema?.find((entry) => entry.id === "sugar-frozen-step")?.frozen).toEqual({
+      key: "step",
+      fields: ["done-when"],
+    });
+    expect(draft.schema?.find((entry) => entry.id === "sugar-frozen-blocker")?.frozen).toEqual({
+      key: "id",
+      fields: [],
+    });
+  });
+
+  it.each([
+    [{ key: "id", fields: ["done-when"] }, /frozen\.key: "id" is not a declared field/],
+    [{ key: "step", fields: ["what"] }, /frozen\.fields\[0\]: "what" is not a declared field/],
+    [{ key: "step", fields: ["step"] }, /frozen\.fields\[0\]: "step" is the key/],
+    [{ key: "step", fields: ["done-when", "done-when"] }, /frozen\.fields\[1\]: duplicate frozen field "done-when"/],
+  ])("rejects a frozen option naming undeclared or misused fields", (frozen, message) => {
+    expect(() =>
+      schema.object("sugar-frozen-invalid", { step: schema.text(), "done-when": schema.text() }, { frozen }),
+    ).toThrow(message);
+  });
+
+  it("lowers an x-frozen keyword from an adapted JSON Schema to the same frozen table", () => {
+    const adapted = schema.typebox("typebox-frozen-step", {
+      type: "object",
+      required: ["step"],
+      properties: { step: { type: "string" }, "done-when": { type: "string" } },
+      "x-frozen": { key: "step", fields: ["done-when"] },
+    });
+    const draft = toDraftJson(
+      trait({
+        id: "typebox-frozen",
+        name: "TypeBox Frozen",
+        description: "Adapter fixture.",
+        procedure: procedure({ description: "No steps.", sequence: [] }),
+        slot: slot({ id: "typebox-frozen-steps", schema: schema.list(adapted) }),
+      }),
+    ) as { readonly schema?: readonly { readonly id: string; readonly frozen?: unknown }[] };
+    expect(draft.schema?.find((entry) => entry.id === "typebox-frozen-step")?.frozen).toEqual({
+      key: "step",
+      fields: ["done-when"],
+    });
+
+    expect(() =>
+      schema.typebox("typebox-frozen-enum", { type: "string", enum: ["a", "b"], "x-frozen": { key: "a" } }),
+    ).toThrow(/x-frozen: only object schemas/);
+    expect(() =>
+      schema.typebox("typebox-frozen-bad", {
+        type: "object",
+        properties: { step: { type: "string" } },
+        "x-frozen": { key: "step", extra: true },
+      }),
+    ).toThrow(/x-frozen\.extra: unsupported frozen keyword/);
+  });
+
   it("marks a field optional via schema.optional without a second field representation", () => {
     const bare = schema.optional(schema.text());
     expect(bare).toEqual({ schema: "schema:text", required: false });
