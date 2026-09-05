@@ -898,6 +898,9 @@ fn handle(command: cli::Command) -> crate::Result<CommandOutput<()>> {
                 cli::SessionsCommand::Delete { failed } => {
                     crate::app::session_delete::handle_sessions_delete(failed)
                 }
+                cli::SessionsCommand::Report { session, json } => {
+                    crate::app::session_report::handle_sessions_report(&session, json)
+                }
             },
             Some(cli::TraitsCommand::Internal { subcommand }) => {
                 handle_internal(subcommand, session)

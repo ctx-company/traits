@@ -53,7 +53,7 @@ Manage:
   state       Report or set a trait's lifecycle state: <trait>, --active, --draft, --deprecated
   dependency  Packages this project depends on, and publishing your own: install (all declared), add <pkg>, remove, update, outdated, info, publish
   diff        Show layer-aware diff for a trait
-  sessions    Manage this repository's run sessions in bulk: delete --failed
+  sessions    Manage this repository's run sessions: delete --failed, report <session>
 AI Assistance:
   generate    Use a model to draft a new trait from a brief
   refine      Use a model to revise an existing canonical trait
@@ -1077,6 +1077,18 @@ pub enum SessionsCommand {
         /// Select every session whose ledger records the `failed` status.
         #[arg(long, group = "selector")]
         failed: bool,
+    },
+    /// Read-only account of one run, per loop and iteration: every frame's
+    /// wall time, tool calls, retries, rejections and outcome, and a compact
+    /// summary of each slot value it submitted — from the session ledger
+    /// and the activity sidecar. Writes nothing; nothing acts on the numbers.
+    Report {
+        /// Session ID, an unambiguous prefix of one, a run ID, or a ledger
+        /// path.
+        session: String,
+        /// Emit structured JSON.
+        #[arg(long)]
+        json: bool,
     },
 }
 
