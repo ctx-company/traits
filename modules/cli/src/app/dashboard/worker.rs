@@ -294,7 +294,7 @@ enum Command {
     },
     Preview(SessionPreviewRequest),
     TraitDetail(ctx_traits_io::library::LibraryDetailSelector),
-    MergeDetail(MergeDetailRequest),
+    MergeDetail(Box<MergeDetailRequest>),
     StoryView(StoryViewRequest),
     AnswerQuestion(AnswerQuestionRequest),
     TaskMarkDone(TaskMarkDoneRequest),
@@ -478,7 +478,7 @@ impl Handle {
     }
 
     pub(super) fn merge_detail(&self, request: MergeDetailRequest) {
-        let _ = self.commands.send(Command::MergeDetail(request));
+        let _ = self.commands.send(Command::MergeDetail(Box::new(request)));
     }
 
     pub(super) fn story_view(&self, request: StoryViewRequest) {
@@ -654,6 +654,7 @@ fn start_action_result(
     }
 }
 
+#[allow(clippy::too_many_arguments)] // one channel per result stream; a struct would only rename the eight
 fn run(
     commands: mpsc::Receiver<Command>,
     snapshots: mpsc::Sender<RefreshResult>,

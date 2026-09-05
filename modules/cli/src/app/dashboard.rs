@@ -1316,10 +1316,7 @@ fn fail_center_projection_for_row(worker: &str, ledger_path: &str, title: &str) 
 impl State {
     fn new() -> Self {
         let mut state = Self::new_without_worker_for_session(None);
-        seed_sessions_from_cache(&mut state);
-        state.repo_root = super::command_handlers::resolve_repo_root(None).ok();
-        state.worker = Some(worker::Handle::new());
-        load_tasks_board_at_startup(&mut state);
+        state.attach_worker_and_seed();
         state
     }
 
@@ -1329,11 +1326,15 @@ impl State {
     ) -> Self {
         let mut state =
             Self::new_without_worker_for_session_with_guide(Some(session_id), guide_chat);
-        seed_sessions_from_cache(&mut state);
-        state.repo_root = super::command_handlers::resolve_repo_root(None).ok();
-        state.worker = Some(worker::Handle::new());
-        load_tasks_board_at_startup(&mut state);
+        state.attach_worker_and_seed();
         state
+    }
+
+    fn attach_worker_and_seed(&mut self) {
+        seed_sessions_from_cache(self);
+        self.repo_root = super::command_handlers::resolve_repo_root(None).ok();
+        self.worker = Some(worker::Handle::new());
+        load_tasks_board_at_startup(self);
     }
 
     /// The worker owns the only mutable IO model. The render state never uses
@@ -6255,7 +6256,7 @@ fn task_session_join(state: &State) -> std::collections::HashMap<String, Vec<usi
     let mut map: std::collections::HashMap<String, Vec<usize>> = std::collections::HashMap::new();
     for (idx, row) in state.sessions.iter().enumerate() {
         let Some(key) = &row.task_key else { continue };
-        if !same_repository(repo_root.as_deref(), row.repo_path.as_deref()) {
+        if !same_repository(repo_root, row.repo_path.as_deref()) {
             continue;
         }
         map.entry(key.clone()).or_default().push(idx);
@@ -7449,7 +7450,7 @@ fn execute_task_mutation_in(
     dir: &camino::Utf8Path,
     mutation: worker::TaskMutation,
 ) -> worker::ActionResult {
-    let result: Result<String, String> = (|| match mutation {
+    let result: Result<String, String> = match mutation {
         worker::TaskMutation::Archive {
             key,
             digest,
@@ -7546,7 +7547,7 @@ fn execute_task_mutation_in(
         worker::TaskMutation::Create { parent, task } => submit_task_creation(task)
             .map(|created| format!("created {} under {parent}", created.key))
             .map_err(|error| format!("split refused: {error}")),
-    })();
+    };
     let refresh_board = result.is_ok();
     worker::ActionResult {
         message: result.unwrap_or_else(|error| error),
