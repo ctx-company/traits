@@ -76,13 +76,13 @@
   },
   "schema:closed-stage": {
     "file": "packages/toolkit/src/schema.ts",
-    "start": 325,
-    "end": 325
+    "start": 326,
+    "end": 326
   },
   "schema:disposition": {
     "file": "packages/toolkit/src/schema.ts",
-    "start": 397,
-    "end": 397
+    "start": 398,
+    "end": 398
   },
   "schema:implementation-draft": {
     "file": ".ctx/traits/authored/implement/source/shared/data.ts",
@@ -91,13 +91,13 @@
   },
   "schema:owner-item": {
     "file": "packages/toolkit/src/schema.ts",
-    "start": 491,
-    "end": 491
+    "start": 492,
+    "end": 492
   },
   "schema:review-verdict": {
     "file": "packages/toolkit/src/schema.ts",
-    "start": 579,
-    "end": 579
+    "start": 580,
+    "end": 580
   },
   "schema:stage": {
     "file": ".ctx/traits/authored/implement/source/shared/data.ts",
@@ -111,8 +111,8 @@
   },
   "schema:work-report": {
     "file": "packages/toolkit/src/schema.ts",
-    "start": 355,
-    "end": 355
+    "start": 356,
+    "end": 356
   },
   "sequence:ctx-branch-arm-p-12-maybe-commit-then/commit-the-work": {
     "file": ".ctx/traits/authored/implement/source/variant/complex/index.ts",
