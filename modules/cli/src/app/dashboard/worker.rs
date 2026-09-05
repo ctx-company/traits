@@ -1018,7 +1018,7 @@ mod tests {
     }
 
     #[test]
-    fn sessions_cache_debounces_immediate_row_changes() {
+    fn sessions_cache_debounce_suppresses_immediate_write_and_final_flushes_latest() {
         let (snapshots, results) = mpsc::channel();
         let mut state = State::new_without_worker();
         let cache_root = sessions_cache_scratch_root();
