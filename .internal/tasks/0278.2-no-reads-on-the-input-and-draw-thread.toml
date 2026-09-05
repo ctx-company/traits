@@ -3,7 +3,7 @@ key = "0278.2"
 title = "No reads on the input-and-draw thread"
 status = "ready"
 raised = "2026-09-03"
-content = '''
+content = """
 This plan separates GOALS from APPROACH. The GOALS section is binding: each
 names an observable outcome, what decides it, and what it excludes. The
 APPROACH section is the architect's suggested route — files, symbols, edit
@@ -83,8 +83,8 @@ seconds. Selection-driven git work and repo resolution also block the loop.
    and behavior preservation for these paths.
 
 5. **Existing suites stay green.** Decided by the declared checks.
-'''
-scope = '''
+"""
+scope = """
 ## Decisions
 
 - Keep the board reader client-owned and fingerprint-based, but run it on the
@@ -122,8 +122,8 @@ scope = '''
 6. Gates: `CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --lib
    dashboard`, then `just test`. Isolate the build cache
    (`CARGO_TARGET_DIR=target`) in a run worktree before trusting a failure.
-'''
-validation = '''
+"""
+validation = """
 ## Watch
 
 - The renderer retains the last board snapshot until a replacement arrives —
@@ -141,7 +141,7 @@ validation = '''
   delivery, retention, behavior-preservation, and regression-guard behaviors
   for all of them.
 - The dashboard lib suite and `just test` are green.
-'''
+"""
 
 [relations]
 parent = "0278"
