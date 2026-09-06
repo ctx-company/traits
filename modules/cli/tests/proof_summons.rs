@@ -407,6 +407,118 @@ fn waiting_driver_accepts_a_socket_answer_without_charging_parked_time() {
     );
 }
 
+/// A stale socket delivery cannot consume or disturb the live summons. The
+/// same waiting driver accepts the matching answer, and its removed control
+/// socket refuses a late duplicate without changing the completed ledger.
+#[test]
+fn waiting_driver_refuses_stale_and_late_socket_answers() {
+    let fixture = start_and_signal("summons-stale-socket-answer");
+    let ledger = Utf8Path::from_path(&fixture.ledger_path).expect("UTF-8 ledger");
+    let mut driver = DriveChild(spawn_ctx(
+        &[
+            "traits",
+            "internal",
+            "drive",
+            "--file",
+            &fixture.canonical_path,
+            "--session",
+            fixture.ledger_path.to_str().expect("UTF-8 ledger"),
+            "--json",
+        ],
+        &fixture.proj,
+        &fixture.home,
+    ));
+
+    let (parked, holder) = await_live_park(ledger);
+    let summons = parked
+        .last_drive_outcome
+        .as_ref()
+        .and_then(|outcome| outcome.summons.as_ref())
+        .expect("awaiting-owner outcome retains summons evidence");
+    let correct_envelope = AnswerEnvelope {
+        target: summons.answer_slot.clone(),
+        schema_ref: summons.schema_ref.clone(),
+        expected_state_digest: parked.state_digest.to_string(),
+        value: serde_json::Value::String("do the thing".to_string()),
+    };
+    let mut stale_envelope = correct_envelope.clone();
+    stale_envelope.expected_state_digest = "deliberately-stale-digest".to_string();
+
+    assert_eq!(
+        run_control::request_answer(ledger, &holder, &stale_envelope)
+            .expect("deliver stale answer to waiting driver"),
+        AnswerDeliveryResult::Delivered(AnswerDeliveryVerdict::Stale),
+        "a wrong digest must be refused without consuming the live summons"
+    );
+    assert!(
+        driver
+            .0
+            .try_wait()
+            .expect("poll stale-answer driver")
+            .is_none(),
+        "the driver must remain waiting after a stale answer"
+    );
+    assert_eq!(
+        run_control::probe(ledger).expect("probe stale-answer driver"),
+        DriverProbe::Held(Some(holder.clone())),
+        "the waiting driver must retain its flock after a stale answer"
+    );
+    let after_stale = ctx_traits_io::run_session::read_run_session(ledger)
+        .expect("re-read ledger after stale answer");
+    assert_eq!(after_stale.state_digest, parked.state_digest);
+    assert_eq!(
+        after_stale
+            .last_drive_outcome
+            .as_ref()
+            .map(|outcome| outcome.outcome.as_str()),
+        Some("awaiting-owner")
+    );
+    assert!(
+        after_stale
+            .next_frame
+            .as_ref()
+            .is_some_and(|frame| ctx_traits_io::answer::is_live_summons(&after_stale, frame)),
+        "a stale answer must leave the durable park as a live summons"
+    );
+
+    assert_eq!(
+        run_control::request_answer(ledger, &holder, &correct_envelope)
+            .expect("deliver matching answer to waiting driver"),
+        AnswerDeliveryResult::Delivered(AnswerDeliveryVerdict::Accepted)
+    );
+    let exit_deadline = Instant::now() + DRIVER_DEADLINE;
+    let status = loop {
+        match driver.0.try_wait().expect("poll accepted driver") {
+            Some(status) => break status,
+            None if Instant::now() < exit_deadline => std::thread::sleep(DRIVER_POLL),
+            None => {
+                panic!("driver did not complete after accepted answer before {DRIVER_DEADLINE:?}")
+            }
+        }
+    };
+    assert!(status.success(), "accepted driver exited with {status}");
+
+    let completed_before_late_delivery = read_ledger_json(&fixture);
+    assert_eq!(
+        session_view(&completed_before_late_delivery)["status"],
+        "completed"
+    );
+    let late_delivery = run_control::request_answer(ledger, &holder, &correct_envelope)
+        .expect("late delivery reports an undelivered/refused result");
+    assert!(
+        !matches!(
+            late_delivery,
+            AnswerDeliveryResult::Delivered(AnswerDeliveryVerdict::Accepted)
+        ),
+        "a duplicate after completion must not be accepted: {late_delivery:?}"
+    );
+    assert_eq!(
+        read_ledger_json(&fixture),
+        completed_before_late_delivery,
+        "a late duplicate must not disturb the completed ledger"
+    );
+}
+
 /// A signal-gated `ask` step parks the run `awaiting-owner` (not a run
 /// failure), with the outcome durable in the ledger re-read off disk.
 #[test]
