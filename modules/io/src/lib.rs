@@ -17,6 +17,7 @@
 //! no part of the portable standard.
 
 pub mod activity_sidecar;
+pub mod answer;
 pub mod audit_journal;
 pub mod authoring_env;
 pub mod builtin_store;
