@@ -453,6 +453,74 @@ prompt = "Return true again."
 output = ["slot:answer-two"]
 "#;
 
+const DRIVE_ASK_TRAIT: &str = r#"id = "center-drive-proof"
+schema-version = "0.4"
+version = "0.1.0"
+name = "Center answer routing proof"
+description = "An owner Ask followed by a command frame."
+
+[[signal]]
+id = "needs-owner"
+description = "An owner answer is required."
+schema = "schema:text"
+
+[[agent]]
+id = "worker"
+description = "Fixture worker."
+summary = "Fixture worker."
+
+[[slot]]
+id = "ask-owner"
+schema = "schema:text"
+description = "The owner's answer."
+
+[[slot]]
+id = "emitted"
+schema = "schema:text"
+description = "Evidence that the owner request was emitted."
+
+[[slot]]
+id = "consume-answer"
+schema = "schema:text"
+description = "The command's consumption of the owner's answer."
+
+[prompt.ask-owner]
+text = "What should I do next?"
+output = ["slot:ask-owner"]
+
+[prompt.emit-needs-owner]
+text = "Request an owner answer."
+output = ["slot:emitted"]
+
+[procedure]
+description = "Park for an owner answer, then consume it."
+
+[[procedure.sequence]]
+id = "emit-needs-owner"
+title = "Request an owner answer"
+agent = "agent:worker"
+output = ["slot:emitted"]
+prompt = "prompt:emit-needs-owner"
+on-complete = ["signal:needs-owner"]
+
+[[procedure.sequence]]
+id = "ask-owner"
+title = "Ask the owner"
+kind = "ask"
+prompt = "prompt:ask-owner"
+output = ["slot:ask-owner"]
+when = "signal:needs-owner"
+
+[[procedure.sequence]]
+id = "consume-answer"
+title = "Consume the owner answer"
+input = ["slot:ask-owner"]
+output = ["slot:consume-answer"]
+
+[procedure.sequence.command]
+argv = ["sh", "-c", "printf '%s' \"$1\"", "_", "{slot:ask-owner}"]
+"#;
+
 fn write_drive_fixture(repo: &std::path::Path, script: &std::path::Path) {
     write_drive_fixture_with_trait(repo, script, DRIVE_PROOF_TRAIT);
 }
@@ -616,6 +684,59 @@ fn prepare_two_frame_drive_fixture(
         &home,
     );
     (repo, home, fixture.to_string())
+}
+
+fn prepare_ask_drive_fixture(
+    root: &std::path::Path,
+) -> (std::path::PathBuf, std::path::PathBuf, String) {
+    let home = root.join("home");
+    let repo = root.join("repository");
+    std::fs::create_dir_all(&repo).expect("create fixture repository");
+    let harness = root.join("fixture-harness.sh");
+    write_ask_fixture_harness(&harness);
+    write_drive_fixture_with_trait(&repo, &harness, DRIVE_ASK_TRAIT);
+    let fixture = ".ctx/traits/center-drive-proof/generated/index.toml";
+    require_success("fixture init", &["traits", "init"], &repo, &home);
+    require_success(
+        "fixture review",
+        &[
+            "traits",
+            "internal",
+            "review",
+            "--file",
+            fixture,
+            "--approve",
+        ],
+        &repo,
+        &home,
+    );
+    require_success(
+        "fixture activate",
+        &["traits", "state", "--active", "--file", fixture],
+        &repo,
+        &home,
+    );
+    (repo, home, fixture.to_string())
+}
+
+fn write_ask_fixture_harness(path: &std::path::Path) {
+    std::fs::write(
+        path,
+        r#"#!/bin/sh
+if [ "$1" = "--fixture-probe" ]; then
+  printf 'fixture-1.0\n'
+  exit 0
+fi
+cat >/dev/null
+printf '%s\n' '{"type":"result","session_id":"center-drive-proof","result":"{\"emitted\":\"requested\",\"needs-owner\":\"requested\"}"}'
+"#,
+    )
+    .expect("write Ask fixture harness");
+    let mut permissions = std::fs::metadata(path)
+        .expect("stat Ask fixture harness")
+        .permissions();
+    permissions.set_mode(0o755);
+    std::fs::set_permissions(path, permissions).expect("make Ask fixture harness executable");
 }
 
 struct DriveEvidence {
@@ -944,6 +1065,28 @@ fn await_session_id(ledger: &std::path::Path) -> String {
             return session.session_id.as_str().to_string();
         }
         assert!(Instant::now() < deadline, "driver did not write its ledger");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+fn await_live_ask_park(
+    ledger: &camino::Utf8Path,
+) -> ctx_traits_io::run_control::DriverHolder {
+    let deadline = Instant::now() + PROCESS_DEADLINE;
+    loop {
+        let session = ctx_traits_io::run_session::read_run_session(ledger)
+            .expect("read parked Ask ledger");
+        if session.last_drive_outcome.as_ref().is_some_and(|outcome| {
+            outcome.outcome.as_str() == "awaiting-owner" && outcome.summons.is_some()
+        }) && let Ok(ctx_traits_io::run_control::DriverProbe::Held(Some(holder))) =
+            ctx_traits_io::run_control::probe(ledger)
+        {
+            return holder;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "driver did not reach the durable awaiting-owner park"
+        );
         std::thread::sleep(Duration::from_millis(20));
     }
 }
@@ -3031,6 +3174,121 @@ fn dropping_the_requester_mid_start_leaves_the_detached_driver_running() {
     assert!(ledger.exists(), "detached driver did not create its ledger");
     std::fs::write(&release, "release").expect("release detached driver");
     await_outcome(&ledger, "completed");
+    sentinel.0.kill().expect("stop private sentinel");
+    sentinel.0.wait().expect("reap private sentinel");
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn answer_process_delivers_to_the_center_registered_parked_driver_without_a_second_spawn() {
+    let _serial = SENTINEL_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
+    let root = scratch("center-held-answer-route");
+    let (repo, home, fixture) = prepare_ask_drive_fixture(&root);
+    let _environment = CenterEnvironment::install(&root);
+    let socket = root.join("center.sock");
+    let mut sentinel =
+        spawn_sentinel_with_home(&root, &socket, &root.join("index.sqlite3"), "5000", &home);
+    drop(await_socket(&socket));
+    let subscription = ctx_traits_io::center::subscribe(None).expect("subscribe before driver start");
+    assert!(matches!(
+        subscription.recv_timeout(PROCESS_DEADLINE),
+        Ok(ctx_traits_io::center::CenterEvent::SnapshotStart)
+    ));
+    assert!(matches!(
+        subscription.recv_timeout(PROCESS_DEADLINE),
+        Ok(ctx_traits_io::center::CenterEvent::SnapshotEnd)
+    ));
+
+    let ledger = repo.join(".ctx/runs/center-drive-proof.json");
+    let session_id = start_fixture(&repo, &fixture, &ledger);
+    let ledger_utf8 = Utf8PathBuf::from_path_buf(ledger.clone()).expect("UTF-8 ledger");
+    let holder = await_live_ask_park(&ledger_utf8);
+    assert_eq!(holder.session_id, session_id);
+
+    let answer = controlled_command(
+        std::path::Path::new(env!("CARGO_BIN_EXE_ctx")),
+        &[
+            "traits",
+            "answer",
+            ledger.to_string_lossy().as_ref(),
+            "--value",
+            "do the thing",
+            "--json",
+        ],
+        &repo,
+        &home,
+    )
+    .output()
+    .expect("run separate answer process");
+    assert!(
+        answer.status.success(),
+        "answer process failed: {}",
+        String::from_utf8_lossy(&answer.stderr)
+    );
+    let answer_json: serde_json::Value =
+        serde_json::from_slice(&answer.stdout).expect("decode answer JSON");
+    assert_eq!(answer_json["value"]["driver-continues"], true);
+    assert!(answer_json["value"]["resumed-status"].is_null());
+
+    await_outcome(&ledger, "completed");
+    let completed = ctx_traits_io::run_session::read_run_session(&ledger_utf8)
+        .expect("read completed ledger directly");
+    assert_eq!(serde_json::to_value(&completed.status).unwrap(), "completed");
+    let completed_json: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&ledger).expect("read completed ledger JSON"))
+            .expect("decode completed ledger JSON");
+    let session_json = completed_json
+        .get("session")
+        .unwrap_or(&completed_json);
+    let values = session_json["accepted-slot-values"]
+        .as_array()
+        .unwrap_or_else(|| panic!("no accepted values in {session_json}"));
+    let answer_value = values
+        .iter()
+        .find(|value| value["ref-text"] == "slot:ask-owner")
+        .expect("accepted Ask answer");
+    assert_eq!(answer_value["producer-evidence"], "cli:ctx traits answer");
+    assert!(
+        values
+            .iter()
+            .find(|value| value["ref-text"] == "slot:consume-answer")
+            .and_then(|value| value["producer-evidence"].as_str())
+            .is_some_and(|evidence| evidence.starts_with("command execution argv=")),
+        "only the original driver may advance the trailing command: {session_json}"
+    );
+
+    let deadline = Instant::now() + PROCESS_DEADLINE;
+    let mut registrations = 0;
+    loop {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        assert!(!remaining.is_zero(), "center did not publish completion");
+        match subscription.recv_timeout(remaining) {
+            Ok(ctx_traits_io::center::CenterEvent::Delta(
+                ctx_traits_io::center::CenterDelta::Appeared { row },
+            )) if row.ledger_path == ledger.to_string_lossy() => registrations += 1,
+            Ok(ctx_traits_io::center::CenterEvent::Delta(
+                ctx_traits_io::center::CenterDelta::Ended { row }
+                | ctx_traits_io::center::CenterDelta::RowChanged { row },
+            )) if row.ledger_path == ledger.to_string_lossy()
+                && row.summary.last_drive_outcome.as_deref() == Some("completed") =>
+            {
+                break;
+            }
+            Ok(_) => {}
+            Err(error) => panic!("read center delta: {error}"),
+        }
+    }
+    assert_eq!(registrations, 1, "the session registered exactly one driver");
+    let logs = std::fs::read_dir(root.join("start-logs"))
+        .expect("read center driver logs")
+        .filter_map(Result::ok)
+        .filter(|entry| entry.path().to_string_lossy().ends_with(".stdout.log"))
+        .count();
+    assert_eq!(logs, 1, "answer delivery must not spawn a second internal drive");
+
+    drop(subscription);
     sentinel.0.kill().expect("stop private sentinel");
     sentinel.0.wait().expect("reap private sentinel");
     let _ = std::fs::remove_dir_all(root);
