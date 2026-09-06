@@ -3,7 +3,7 @@ key = "0278.4"
 title = "Subscribes stop re-serializing the whole corpus"
 status = "ready"
 raised = "2026-09-03"
-content = '''
+content = """
 This plan separates GOALS from APPROACH. The GOALS section is binding: each
 names an observable outcome, what decides it, and what it excludes. The
 APPROACH section is the architect's suggested route — files, symbols, edit
@@ -72,8 +72,8 @@ row changed — per-open cost grows linearly with the corpus.
    both declared checks exclude desktop.
    Decided by: the declared checks, plus the reported desktop commands when
    applicable.
-'''
-scope = '''
+"""
+scope = """
 ## Decisions
 
 - Cache serialized bytes, not a second row model: the authoritative row stays
@@ -100,8 +100,8 @@ scope = '''
    proof_center` for the real-process seam if the subscribe path changed
    shape. Isolate the build cache (`CARGO_TARGET_DIR=target`) in a run
    worktree before trusting a failure.
-'''
-validation = '''
+"""
+validation = """
 ## Watch
 
 - Byte-for-byte wire compatibility: an installed older client and the desktop
@@ -117,7 +117,7 @@ validation = '''
   pass in the center suite; ordering/backpressure/bounded-queue proofs pass
   unchanged; `just test` is green; desktop commands were run and reported if
   shared types were touched.
-'''
+"""
 
 [relations]
 parent = "0278"
