@@ -355,6 +355,47 @@ mod tests {
     }
 
     #[test]
+    fn transaction_core_runs_while_the_driver_lock_is_held() {
+        let ledger_path = scratch_ledger_path_buf("lock-free-core");
+        let session = awaiting_owner_session_fixture("lock-free-core-run");
+        crate::run_session::write_run_session(&ledger_path, &session)
+            .expect("write fixture session");
+        let submission = || AnswerSubmission {
+            ledger_path: &ledger_path,
+            trait_file: None,
+            session_store: None,
+            target: "slot:ask-owner",
+            schema_ref: Some("schema:text"),
+            expected_state_digest:
+                "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+            value: serde_json::Value::String("do the thing".to_string()),
+            caller: CallerProvenance {
+                surface: "test".to_string(),
+                caller: "answer-test".to_string(),
+                agent: None,
+                harness: None,
+            },
+            existing_input_evidence: "answer-test",
+            advance_command_frames: true,
+        };
+
+        let maintenance = crate::run_control::try_acquire_maintenance(&ledger_path)
+            .expect("acquire maintenance lock")
+            .expect("fixture lock is free");
+        assert!(matches!(
+            submit_answer(submission()).expect("submit answer under held lock"),
+            AnswerSubmissionOutcome::LockHeld
+        ));
+        assert!(matches!(
+            apply_answer_transaction(submission()).expect("apply lock-free transaction"),
+            AnswerSubmissionOutcome::Stale
+        ));
+        drop(maintenance);
+        let _ = std::fs::remove_file(&ledger_path);
+        let _ = std::fs::remove_file(crate::run_control::driver_lock_path(&ledger_path));
+    }
+
+    #[test]
     fn parse_schema_aware_value_takes_raw_text_only_for_text_schema() {
         assert_eq!(
             parse_schema_aware_value("do the thing", Some("schema:text")),
@@ -386,6 +427,16 @@ mod tests {
 
     #[test]
     fn answer_delivery_verdict_maps_submission_outcomes() {
+        let response = ctx_traits_core::procedure::session::call_response(
+            awaiting_owner_session_fixture("verdict-submitted-run"),
+            CallResponseKind::AcceptedNextFrame,
+        );
+        assert_eq!(
+            AnswerDeliveryVerdict::from(&AnswerSubmissionOutcome::Submitted {
+                response: Box::new(response),
+            }),
+            AnswerDeliveryVerdict::Accepted
+        );
         assert_eq!(
             AnswerDeliveryVerdict::from(&AnswerSubmissionOutcome::Cancelled),
             AnswerDeliveryVerdict::Cancelled
