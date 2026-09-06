@@ -15,11 +15,31 @@
 //! through the trailing command step's captured argv.
 
 use std::fs;
+use std::time::{Duration, Instant};
 
+use camino::Utf8Path;
+use ctx_traits_io::answer::{AnswerDeliveryVerdict, AnswerEnvelope};
+use ctx_traits_io::run_control::{self, AnswerDeliveryResult, DriverProbe};
 use support::{
     ScratchRoot, call_session_frame, git_init, require_success, require_success_with_env, run_ctx,
-    symlink_node_modules, utf8,
+    spawn_ctx, symlink_node_modules, utf8,
 };
+
+const DRIVER_DEADLINE: Duration = Duration::from_secs(30);
+const DRIVER_POLL: Duration = Duration::from_millis(20);
+
+/// Keeps a detached driver from surviving a failing assertion in a process
+/// proof, where an unanswered Ask otherwise waits indefinitely by design.
+struct DriveChild(std::process::Child);
+
+impl Drop for DriveChild {
+    fn drop(&mut self) {
+        if self.0.try_wait().ok().flatten().is_none() {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+}
 
 fn fixture_source() -> &'static str {
     // The `ask` step is authored through the newly exposed FUNCTIONAL surface
@@ -210,9 +230,33 @@ fn start_with_source_and_signal(
     }
 }
 
+fn await_live_park(
+    ledger: &Utf8Path,
+) -> (
+    ctx_traits_core::procedure::session::Session,
+    ctx_traits_io::run_control::DriverHolder,
+) {
+    let deadline = Instant::now() + DRIVER_DEADLINE;
+    loop {
+        let session =
+            ctx_traits_io::run_session::read_run_session(ledger).expect("read parked ledger");
+        if session.last_drive_outcome.as_ref().is_some_and(|outcome| {
+            outcome.outcome.as_str() == "awaiting-owner" && outcome.summons.is_some()
+        }) && let Ok(DriverProbe::Held(Some(holder))) = run_control::probe(ledger)
+        {
+            return (session, holder);
+        }
+        assert!(
+            Instant::now() < deadline,
+            "driver did not reach the durable awaiting-owner park before {DRIVER_DEADLINE:?}"
+        );
+        std::thread::sleep(DRIVER_POLL);
+    }
+}
+
 fn drive_to_park(fixture: &Fixture) -> String {
-    require_success(
-        "`ctx traits internal drive --json` (resume, reach the park)",
+    let ledger = Utf8Path::from_path(&fixture.ledger_path).expect("UTF-8 ledger");
+    let driver = spawn_ctx(
         &[
             "traits",
             "internal",
@@ -225,7 +269,23 @@ fn drive_to_park(fixture: &Fixture) -> String {
         ],
         &fixture.proj,
         &fixture.home,
-    )
+    );
+    let (_, holder) = await_live_park(ledger);
+    assert!(
+        run_control::request_interrupt(ledger, &holder).expect("interrupt parked driver"),
+        "parked driver did not acknowledge the control interrupt"
+    );
+    let output = driver
+        .wait_with_output()
+        .expect("wait for parked driver after control interrupt");
+    assert!(
+        output.status.success(),
+        "parked driver exited with {}\nstdout:\n{}\nstderr:\n{}",
+        output.status,
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8(output.stdout).expect("driver stdout is UTF-8")
 }
 
 /// Some persisted ledger shapes wrap the session under a `"session"` key
@@ -261,6 +321,90 @@ fn build_and_run() -> (Fixture, serde_json::Value, serde_json::Value) {
     let run_json = value_json(&run_stdout);
     let ledger_json = read_ledger_json(&fixture);
     (fixture, run_json, ledger_json)
+}
+
+/// A live driver owns the flock while it waits for an Ask answer. The answer
+/// travels through its authenticated control socket, is applied by that same
+/// process, and parked wall time is excluded from the persisted run budget.
+#[test]
+fn waiting_driver_accepts_a_socket_answer_without_charging_parked_time() {
+    let fixture = start_and_signal("summons-waiting-driver");
+    let ledger = Utf8Path::from_path(&fixture.ledger_path).expect("UTF-8 ledger");
+    let started = Instant::now();
+    let mut driver = DriveChild(spawn_ctx(
+        &[
+            "traits",
+            "internal",
+            "drive",
+            "--file",
+            &fixture.canonical_path,
+            "--session",
+            fixture.ledger_path.to_str().expect("UTF-8 ledger"),
+            "--json",
+        ],
+        &fixture.proj,
+        &fixture.home,
+    ));
+
+    let (parked, holder) = await_live_park(ledger);
+    let summons = parked
+        .last_drive_outcome
+        .as_ref()
+        .and_then(|outcome| outcome.summons.as_ref())
+        .expect("awaiting-owner outcome retains summons evidence");
+    let parked_at = Instant::now();
+
+    std::thread::sleep(Duration::from_secs(3));
+    let delivery = run_control::request_answer(
+        ledger,
+        &holder,
+        &AnswerEnvelope {
+            target: summons.answer_slot.clone(),
+            schema_ref: summons.schema_ref.clone(),
+            expected_state_digest: parked.state_digest.to_string(),
+            value: serde_json::Value::String("do the thing".to_string()),
+        },
+    )
+    .expect("deliver answer to waiting driver");
+    assert_eq!(
+        delivery,
+        AnswerDeliveryResult::Delivered(AnswerDeliveryVerdict::Accepted),
+        "the live driver must acknowledge an accepted answer"
+    );
+    let waited = parked_at.elapsed();
+
+    let exit_deadline = Instant::now() + DRIVER_DEADLINE;
+    let status = loop {
+        match driver.0.try_wait().expect("poll waiting driver") {
+            Some(status) => break status,
+            None if Instant::now() < exit_deadline => std::thread::sleep(DRIVER_POLL),
+            None => {
+                panic!("driver did not complete after accepted answer before {DRIVER_DEADLINE:?}")
+            }
+        }
+    };
+    assert!(status.success(), "accepted driver exited with {status}");
+
+    let completed = ctx_traits_io::run_session::read_run_session(ledger)
+        .expect("read completed waiting-driver ledger");
+    assert_eq!(
+        serde_json::to_value(&completed.status).expect("serialize completed status"),
+        "completed"
+    );
+    assert_eq!(
+        completed
+            .last_drive_outcome
+            .as_ref()
+            .map(|outcome| outcome.outcome.as_str()),
+        Some("completed")
+    );
+    let total_wall_seconds = started.elapsed().as_secs_f64();
+    let parked_seconds = waited.as_secs_f64();
+    assert!(
+        total_wall_seconds - completed.ledger.elapsed_seconds as f64 > parked_seconds - 1.0,
+        "persisted elapsed time ({}) charged most of the parked span ({parked_seconds:.2}s; total wall {total_wall_seconds:.2}s)",
+        completed.ledger.elapsed_seconds
+    );
 }
 
 /// A signal-gated `ask` step parks the run `awaiting-owner` (not a run
