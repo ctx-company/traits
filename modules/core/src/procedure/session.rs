@@ -5519,17 +5519,9 @@ output = ["slot:second-work"]
     }
 
     #[test]
-    fn rejected_owner_answer_preserves_awaiting_owner_evidence() {
+    fn rejected_answer_preserves_awaiting_owner_evidence_only_for_an_ask_frame() {
         let trait_ref = fixture_trait();
-        let mut session = submit_current(
-            &trait_ref,
-            start_session(&trait_ref),
-            "slot:verdict",
-            serde_json::json!({"status": "revise"}),
-            Some("reviewer"),
-        )
-        .session;
-        session.last_drive_outcome = Some(DriveOutcome {
+        let awaiting_owner = DriveOutcome {
             outcome: DriveOutcomeKind::AwaitingOwner,
             recorded_at_epoch: 0,
             provider_credits_pause: None,
@@ -5544,7 +5536,16 @@ output = ["slot:second-work"]
             reclaim: None,
             interruption_cause: None,
             interruption_position: None,
-        });
+        };
+        let mut session = submit_current(
+            &trait_ref,
+            start_session(&trait_ref),
+            "slot:verdict",
+            serde_json::json!({"status": "revise"}),
+            Some("reviewer"),
+        )
+        .session;
+        session.last_drive_outcome = Some(awaiting_owner.clone());
 
         let rejected = reject_without_advancing(
             &trait_ref,
@@ -5570,6 +5571,30 @@ output = ["slot:second-work"]
             rejected.last_drive_outcome.map(|outcome| outcome.outcome),
             Some(DriveOutcomeKind::AwaitingOwner)
         );
+
+        let mut non_ask_session = start_session(&trait_ref);
+        non_ask_session.last_drive_outcome = Some(awaiting_owner);
+        let rejected_non_ask = reject_without_advancing(
+            &trait_ref,
+            non_ask_session,
+            StepValidationReport {
+                sequence_index: 0,
+                accepted_outputs: Vec::new(),
+                rejected_outputs: Vec::new(),
+                missing_required_outputs: vec!["slot:verdict".to_string()],
+                unfilled_optional_outputs: Vec::new(),
+                unexpected_outputs: Vec::new(),
+                schema_validation: Vec::new(),
+                signal_validation: Vec::new(),
+                warnings: Vec::new(),
+                next_action: StepNextAction::Rejected,
+            },
+            None,
+        )
+        .expect("rejection rebuilds the non-ask session");
+
+        assert_eq!(rejected_non_ask.status, Status::Rejected);
+        assert!(rejected_non_ask.last_drive_outcome.is_none());
     }
 }
 
