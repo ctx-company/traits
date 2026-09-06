@@ -6199,6 +6199,44 @@ mod tests {
         serde_json::from_value(value).expect("fixture outcome deserializes")
     }
 
+    fn parked_ask_session_with_outcome(
+        outcome: Option<&str>,
+    ) -> ctx_traits_core::procedure::session::Session {
+        use ctx_traits_core::procedure::runtime::{SequenceFrame, SequenceFrameKind};
+
+        let mut session = match outcome {
+            Some(outcome) => fixture_session_with_outcome("waiting-on-human", outcome),
+            None => fixture_session("waiting-on-human"),
+        };
+        session.next_frame = Some(Box::new(SequenceFrame {
+            kind: SequenceFrameKind::Ask,
+            run_id: "run-fixture".to_string(),
+            trait_id: "fixture-trait".to_string(),
+            sequence_index: Some(0),
+            run_index: Some(0),
+            item_id: Some("ask-owner".to_string()),
+            position_path: Vec::new(),
+            loop_context: None,
+            for_each_context: None,
+            guard_explanations: Vec::new(),
+            signal_payloads: Vec::new(),
+            signal_emission_ceiling: 0,
+            title: "ask-owner".to_string(),
+            frame_text: "What should I do next?".to_string(),
+            prompt: None,
+            command: None,
+            available_inputs: Vec::new(),
+            resource_evidence: Vec::new(),
+            requested_outputs: Vec::new(),
+            assigned_agent: None,
+            allowed_signals: Vec::new(),
+            derived_signals: Vec::new(),
+            call_template: None,
+            warnings: Vec::new(),
+        }));
+        session
+    }
+
     fn write_fixture_ledger(root: &Utf8Path, repo: &str, status: &str) -> Utf8PathBuf {
         let store = root.join(repo);
         std::fs::create_dir_all(store.as_std_path()).expect("create repository store");
@@ -6589,6 +6627,75 @@ mod tests {
             assert!(
                 crate::file_lock::read_lock_metadata::<crate::run_control::DriverHolder>(&mut lock)
                     .is_none()
+            );
+            let _ = std::fs::remove_dir_all(root.as_std_path());
+        }
+    }
+
+    #[test]
+    fn discovery_does_not_interrupt_a_durably_parked_ask() {
+        let root = scratch("parked-ask-settled-pause");
+        let paths = paths(root.clone());
+        let ledger = root.join("repository").join("session-fixture.json");
+        std::fs::create_dir_all(ledger.parent().expect("ledger parent").as_std_path())
+            .expect("create repository store");
+        crate::run_session::write_run_session(
+            &ledger,
+            &parked_ask_session_with_outcome(Some("awaiting-owner")),
+        )
+        .expect("write parked ask ledger");
+
+        let mut model = CenterModel::open(&paths).expect("open center");
+        model.discover(&paths).expect("discover parked ask");
+
+        let persisted = crate::run_session::read_run_session(&ledger).expect("read parked ask");
+        assert!(matches!(
+            persisted
+                .last_drive_outcome
+                .as_ref()
+                .map(|outcome| &outcome.outcome),
+            Some(ctx_traits_core::procedure::session::DriveOutcomeKind::AwaitingOwner)
+        ));
+        let row = model.rows.get(&ledger).expect("parked ask row");
+        assert!(
+            row.summary
+                .session_state
+                .is_some_and(ctx_traits_core::procedure::activity::SessionState::is_resumable)
+        );
+        let _ = std::fs::remove_dir_all(root.as_std_path());
+    }
+
+    #[test]
+    fn discovery_repair_keeps_unheld_parked_asks_resumable() {
+        for (name, outcome) in [("cleared", None), ("interrupted", Some("interrupted"))] {
+            let root = scratch(&format!("parked-ask-{name}"));
+            let paths = paths(root.clone());
+            let ledger = root.join("repository").join("session-fixture.json");
+            std::fs::create_dir_all(ledger.parent().expect("ledger parent").as_std_path())
+                .expect("create repository store");
+            crate::run_session::write_run_session(
+                &ledger,
+                &parked_ask_session_with_outcome(outcome),
+            )
+            .expect("write parked ask ledger");
+
+            let mut model = CenterModel::open(&paths).expect("open center");
+            model.discover(&paths).expect("discover parked ask");
+
+            let persisted =
+                crate::run_session::read_run_session(&ledger).expect("read repaired ask");
+            assert!(matches!(
+                persisted
+                    .last_drive_outcome
+                    .as_ref()
+                    .map(|outcome| &outcome.outcome),
+                Some(ctx_traits_core::procedure::session::DriveOutcomeKind::Interrupted)
+            ));
+            let row = model.rows.get(&ledger).expect("parked ask row");
+            assert!(
+                row.summary
+                    .session_state
+                    .is_some_and(ctx_traits_core::procedure::activity::SessionState::is_resumable)
             );
             let _ = std::fs::remove_dir_all(root.as_std_path());
         }
