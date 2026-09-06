@@ -9448,6 +9448,13 @@ mod tests {
             sessions_from_center_rows(&[center_session_row(true, "waiting-on-human", None)])
                 .pop()
                 .expect("held non-Ask row");
+        let held_non_waiting = sessions_from_center_rows(&[center_session_row(
+            true,
+            "awaiting-agent-output",
+            None,
+        )])
+        .pop()
+        .expect("held non-waiting row");
         let unheld_ask = sessions_from_center_rows(&[center_session_row(
             false,
             "waiting-on-human",
@@ -9457,6 +9464,7 @@ mod tests {
         .expect("unheld Ask row");
 
         assert_eq!(held_non_ask.state_text, "live");
+        assert_eq!(held_non_waiting.state_text, "live");
         assert_eq!(unheld_ask.state_text, "waiting-on-human");
     }
 
