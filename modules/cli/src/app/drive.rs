@@ -2755,6 +2755,9 @@ fn drive_loop(
                     },
                 );
                 if wait_exit == AnswerWaitExit::Accepted {
+                    // An accepted answer advances past this Ask, so it is no
+                    // longer valid terminal park evidence for the report.
+                    report.summons_park = None;
                     continue 'frames;
                 }
                 report.status = "awaiting-owner".to_string();
