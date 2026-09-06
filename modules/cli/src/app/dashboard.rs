@@ -12660,7 +12660,7 @@ argv = ["git", "commit", "-m", "fixture"]
             ),
             (
                 "interrupted parked ask",
-                SessionClass::Terminal,
+                SessionClass::Resumable,
                 Some(Status::WaitingOnHuman),
                 Some(DriveOutcomeKind::Interrupted),
                 SessionGroup::Pending,
