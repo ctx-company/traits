@@ -3427,20 +3427,23 @@ fn run_attached_observer(
         &loaded.trait_ref,
         session.run_id.clone(),
     )?;
+    let trait_ref = loaded.trait_ref.clone();
     let pane = RatatuiPane::new_run_pane().map_err(|source| {
         ctx_traits_io::Error::from(ctx_traits_io::environment::Error::Filesystem {
             path: "<tty>".to_string(),
             source,
         })
     })?;
+    let initial_observer_answer_prompt = observer_answer_prompt(&loaded, &session);
     let observer = run_view::RunPanel::new_observer(
         loaded.trait_ref.name.as_str().to_string(),
-        loaded.trait_ref,
+        trait_ref,
         plan,
         session,
         request.ledger_path.clone(),
         pane,
     );
+    observer.set_observer_answer_prompt(initial_observer_answer_prompt);
     // P081 "ask: one deliberate rule" — the observer never dispatches a
     // fresh guide seat; the ONLY permitted handle is the one this dashboard
     // process already holds in-process from a `d`-handoff for this exact
@@ -3454,6 +3457,18 @@ fn run_attached_observer(
     let mut last_reload = std::time::Instant::now();
     while !observer.presentation_closed() {
         observer.tick();
+        if let Some(text) = observer.take_pending_answer() {
+            let note = match submit_observer_answer(request, &text) {
+                Ok(note) => note,
+                Err(error) => format!("answer rejected: {error}"),
+            };
+            observer.note(note);
+            if let Ok(session) = ctx_traits_io::run_session::read_run_session(&request.ledger_path)
+            {
+                observer.set_observer_answer_prompt(observer_answer_prompt(&loaded, &session));
+                observer.refresh_from_ledger(&session, &request.ledger_path);
+            }
+        }
         std::thread::sleep(TICK);
         if last_reload.elapsed() >= RELOAD_INTERVAL {
             last_reload = std::time::Instant::now();
@@ -3463,6 +3478,7 @@ fn run_attached_observer(
             // above (before any frame exists) surfaces as `Err`.
             if let Ok(session) = ctx_traits_io::run_session::read_run_session(&request.ledger_path)
             {
+                observer.set_observer_answer_prompt(observer_answer_prompt(&loaded, &session));
                 observer.refresh_from_ledger(&session, &request.ledger_path);
             }
         }
@@ -3470,6 +3486,132 @@ fn run_attached_observer(
     let finished = observer.observer_finished();
     observer.close();
     Ok(finished.then(|| "the run finished while attached".to_string()))
+}
+
+fn observer_answer_prompt(
+    loaded: &ctx_traits_io::run::LoadedTrait,
+    session: &ctx_traits_core::procedure::session::Session,
+) -> Option<(String, String)> {
+    let frame = session.next_frame.as_ref()?;
+    if !super::frame_prompt::is_live_summons(session, frame) {
+        return None;
+    }
+    let output = frame.requested_outputs.first()?;
+    let summons = session
+        .last_drive_outcome
+        .as_ref()
+        .and_then(|outcome| outcome.summons.as_ref());
+    let title = summons
+        .map(|summons| summons.title.clone())
+        .unwrap_or_else(|| "Answer question".to_string());
+    let question = summons_question(loaded, session, frame).ok()?;
+    let schema = output.schema_ref.as_deref().unwrap_or("schema:any");
+    Some((
+        title,
+        format!(
+            "{question}\n\nAnswer slot: {}\nSchema: {schema}",
+            output.slot_ref
+        ),
+    ))
+}
+
+fn submit_observer_answer(request: &AttachRequest, text: &str) -> crate::Result<String> {
+    let session = ctx_traits_io::run_session::read_run_session(&request.ledger_path)?;
+    let frame = session
+        .next_frame
+        .as_ref()
+        .filter(|frame| super::frame_prompt::is_live_summons(&session, frame))
+        .ok_or_else(|| crate::Error::Command {
+            message: "answer refused: question is no longer live".to_string(),
+        })?;
+    let output = frame
+        .requested_outputs
+        .first()
+        .ok_or_else(|| crate::Error::Command {
+            message: "answer refused: question has no answer slot".to_string(),
+        })?;
+    let value = parse_schema_aware_value(text, output.schema_ref.as_deref()).map_err(|error| {
+        crate::Error::Command {
+            message: format!("answer rejected: {error}"),
+        }
+    })?;
+    let trait_file = resolve_answer_trait_file(&session, None);
+    let outcome = route_answer(
+        session.session_id.as_str(),
+        AnswerSubmission {
+            ledger_path: &request.ledger_path,
+            trait_file: trait_file.as_deref(),
+            session_store: None,
+            target: output.slot_ref.as_str(),
+            schema_ref: output.schema_ref.as_deref(),
+            expected_state_digest: session.state_digest.as_str(),
+            value,
+            caller: ctx_traits_core::procedure::session::CallerProvenance {
+                surface: "dashboard".to_string(),
+                caller: "ctx traits dashboard attach".to_string(),
+                agent: None,
+                harness: None,
+            },
+            existing_input_evidence: "ctx traits dashboard observer answer",
+            advance_command_frames: true,
+        },
+        HeldDeliveryPolicy::Allow,
+    )?;
+    Ok(observer_answer_outcome_note(
+        session.session_id.as_str(),
+        outcome,
+    ))
+}
+
+fn observer_answer_outcome_note(session_id: &str, outcome: AnswerRouteOutcome) -> String {
+    match outcome {
+        AnswerRouteOutcome::Delivered(AnswerDeliveryVerdict::Accepted) => {
+            format!("answer accepted; {session_id}'s driver continues")
+        }
+        AnswerRouteOutcome::Delivered(AnswerDeliveryVerdict::Stale) | AnswerRouteOutcome::Stale => {
+            format!("answer refused: {session_id}'s question changed; reopen it")
+        }
+        AnswerRouteOutcome::Delivered(AnswerDeliveryVerdict::Cancelled)
+        | AnswerRouteOutcome::Cancelled => {
+            format!("answer refused: {session_id}'s question was cancelled")
+        }
+        AnswerRouteOutcome::Delivered(AnswerDeliveryVerdict::NotWaiting) => {
+            format!("answer refused: {session_id}'s driver is no longer waiting")
+        }
+        AnswerRouteOutcome::Delivered(AnswerDeliveryVerdict::RejectedCorrection { detail }) => {
+            detail
+        }
+        AnswerRouteOutcome::RejectedCorrection => {
+            "answer rejected; correct it and reopen the question".to_string()
+        }
+        AnswerRouteOutcome::Delivered(AnswerDeliveryVerdict::NotRouted)
+        | AnswerRouteOutcome::NotRouted => {
+            "answer refused: question did not route to its current frame".to_string()
+        }
+        AnswerRouteOutcome::Submitted { response }
+            if response.session.status
+                == ctx_traits_core::procedure::session::Status::Completed =>
+        {
+            format!("answer accepted; {session_id} completed")
+        }
+        AnswerRouteOutcome::Submitted { .. } => {
+            format!("answer accepted; {session_id} updated")
+        }
+        AnswerRouteOutcome::HeldDeliveryRefused => {
+            format!("answer refused: {session_id}'s live driver owns advancement")
+        }
+        AnswerRouteOutcome::HolderUnverifiable => {
+            format!("answer refused: {session_id}'s driver lock holder could not be verified")
+        }
+        AnswerRouteOutcome::Undelivered => {
+            format!("answer refused: {session_id}'s verified driver could not receive the answer")
+        }
+        AnswerRouteOutcome::DriverAppeared => {
+            format!(
+                "answer refused: {session_id}'s driver appeared while applying the answer; retry"
+            )
+        }
+    }
 }
 
 /// P081/0145: pure mapping from [`run_attached_observer`]'s outcome to what
@@ -8998,6 +9140,31 @@ mod tests {
         assert!(
             state.worker.is_none(),
             "held delivery must not request a resume"
+        );
+    }
+
+    #[test]
+    fn observer_answer_submission_note_never_requests_a_resume() {
+        use ctx_traits_core::procedure::session::CallResponseKind;
+
+        let response = ctx_traits_core::procedure::session::call_response(
+            awaiting_owner_session_fixture(
+                "observer-answer",
+                "ask-owner",
+                "ask-owner",
+                "What should I do next?",
+            ),
+            CallResponseKind::AcceptedNextFrame,
+        );
+
+        assert_eq!(
+            observer_answer_outcome_note(
+                "observer-answer",
+                AnswerRouteOutcome::Submitted {
+                    response: Box::new(response),
+                },
+            ),
+            "answer accepted; observer-answer updated"
         );
     }
 

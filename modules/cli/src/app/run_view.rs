@@ -301,6 +301,13 @@ struct RunPanelState {
     /// key that resolves the modal, and clears both fields together so a
     /// stale sender is never left installed under an unrelated modal.
     pending_input_reply: Option<mpsc::Sender<Option<String>>>,
+    /// An answer submitted through an attached observer's modal. Unlike a
+    /// drive prompt, no drive thread owns a reply receiver; the attach loop
+    /// drains this value and delivers it through the shared answer router.
+    pending_answer: Option<String>,
+    /// The current live summons presentation, supplied by the dashboard attach
+    /// loop after it resolves durable evidence or the legacy trait fallback.
+    observer_answer_prompt: Option<(String, String)>,
     /// P244: the tree lines drawn by the LAST completed render, cached so
     /// [`RunPanel::close`] can commit exactly the last-drawn frame to
     /// scrollback via [`RatatuiPane::commit_inline_scrollback`] — a no-op
@@ -502,6 +509,8 @@ impl RunPanel {
             failure_modal: false,
             failure_choice: Arc::clone(&failure_choice),
             pending_input_reply: None,
+            pending_answer: None,
+            observer_answer_prompt: None,
             last_tree_lines: Vec::new(),
             merge_rows: Vec::new(),
             title_state,
@@ -902,6 +911,24 @@ impl RunPanel {
             render_locked(&mut state);
         }
         receiver
+    }
+
+    /// Takes one observer-modal submission, if the input pump has received it.
+    pub(crate) fn take_pending_answer(&self) -> Option<String> {
+        self.state
+            .lock()
+            .ok()
+            .and_then(|mut state| state.pending_answer.take())
+    }
+
+    /// Updates the observer-only answer affordance from the latest ledger
+    /// snapshot. `None` makes `a` inert rather than opening a stale prompt.
+    pub(crate) fn set_observer_answer_prompt(&self, prompt: Option<(String, String)>) {
+        if let Ok(mut state) = self.state.lock()
+            && state.observer
+        {
+            state.observer_answer_prompt = prompt;
+        }
     }
 
     /// P551: append a one-line progress note (e.g. worktree setup activity)
@@ -1458,6 +1485,9 @@ fn apply_open_modal_key(state: &mut RunPanelState, key: &KeyEvent) -> bool {
             if let Some(reply) = state.pending_input_reply.take() {
                 state.modal = None;
                 let _ = reply.send(Some(text));
+            } else if state.observer {
+                state.modal = None;
+                state.pending_answer = Some(text);
             }
         }
         // The run view opens only `Modal::confirm` and `Modal::text_input`, so a
@@ -1465,6 +1495,26 @@ fn apply_open_modal_key(state: &mut RunPanelState, key: &KeyEvent) -> bool {
         tui_kit::ModalOutcome::Chosen(_) => {}
         tui_kit::ModalOutcome::Pending => {}
     }
+    true
+}
+
+fn open_observer_answer_modal_for_key(state: &mut RunPanelState, key: &KeyEvent) -> bool {
+    if !state.observer
+        || key.code != KeyCode::Char('a')
+        || !key.modifiers.is_empty()
+        || state.modal.is_some()
+    {
+        return false;
+    }
+    let Some((title, body)) = state.observer_answer_prompt.clone() else {
+        return false;
+    };
+    state.modal = Some(tui_kit::Modal::text_input_with_body(
+        title,
+        body,
+        String::new(),
+        false,
+    ));
     true
 }
 
@@ -1491,6 +1541,10 @@ fn poll_and_apply_keys(state: &mut RunPanelState) -> bool {
             continue;
         }
         if apply_open_modal_key(state, &key) {
+            changed = true;
+            continue;
+        }
+        if open_observer_answer_modal_for_key(state, &key) {
             changed = true;
             continue;
         }
@@ -2378,6 +2432,95 @@ description = "A test trait."
         }
 
         assert_eq!(receiver.recv().expect("reply sent"), None);
+    }
+
+    #[test]
+    fn observer_answer_submission_drains_and_cancel_is_inert() {
+        let trait_ref: ctx_traits_core::Trait = toml::from_str(
+            r#"
+id = "observer-answer-test"
+schema-version = "0.4"
+version = "0.1.0"
+name = "Observer Answer Test"
+description = "A test trait."
+"#,
+        )
+        .expect("minimal trait parses");
+        let panel = RunPanel::new_with_pane(
+            "observer-answer-test".to_string(),
+            trait_ref,
+            attribution_plan(vec![planned_item(
+                "check",
+                ctx_traits_core::procedure::run::PlannedSequenceKind::Check,
+                0,
+                0,
+            )]),
+            session_with_history_revisions(Vec::new(), Vec::new()),
+            RatatuiPane::new_detached_for_test(),
+        );
+        panel.state.lock().expect("state lock").observer = true;
+
+        let answer_key = KeyEvent::new(KeyCode::Char('a'), crossterm::event::KeyModifiers::NONE);
+        {
+            let mut state = panel.state.lock().expect("state lock");
+            assert!(
+                !open_observer_answer_modal_for_key(&mut state, &answer_key),
+                "a must not open a modal when the observed frame is not a live summons"
+            );
+            state.observer_answer_prompt = Some(("Question".to_string(), String::new()));
+            assert!(open_observer_answer_modal_for_key(&mut state, &answer_key));
+            assert!(
+                state.modal.is_some(),
+                "a live summons opens the answer modal"
+            );
+            apply_open_modal_key(
+                &mut state,
+                &KeyEvent::new(KeyCode::Esc, crossterm::event::KeyModifiers::NONE),
+            );
+            assert!(state.modal.is_none(), "cancel must close the keyed modal");
+            assert!(
+                state.pending_answer.is_none(),
+                "cancel must not queue an answer"
+            );
+        }
+
+        {
+            let mut state = panel.state.lock().expect("state lock");
+            assert!(open_observer_answer_modal_for_key(&mut state, &answer_key));
+            apply_open_modal_key(
+                &mut state,
+                &KeyEvent::new(KeyCode::Esc, crossterm::event::KeyModifiers::NONE),
+            );
+            assert!(state.modal.is_none(), "cancel must close the modal");
+            assert!(
+                state.pending_answer.is_none(),
+                "cancel must not queue an answer"
+            );
+        }
+        assert_eq!(panel.take_pending_answer(), None);
+
+        {
+            let mut state = panel.state.lock().expect("state lock");
+            assert!(open_observer_answer_modal_for_key(&mut state, &answer_key));
+        }
+        for key in [
+            KeyCode::Char('y'),
+            KeyCode::Char('e'),
+            KeyCode::Char('s'),
+            KeyCode::Enter,
+        ] {
+            let mut state = panel.state.lock().expect("state lock");
+            apply_open_modal_key(
+                &mut state,
+                &KeyEvent::new(key, crossterm::event::KeyModifiers::NONE),
+            );
+        }
+        assert_eq!(panel.take_pending_answer(), Some("yes".to_string()));
+        assert_eq!(
+            panel.take_pending_answer(),
+            None,
+            "the accessor drains the slot"
+        );
     }
 
     #[test]
