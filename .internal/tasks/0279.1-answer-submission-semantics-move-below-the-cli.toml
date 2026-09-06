@@ -3,7 +3,7 @@ key = "0279.1"
 title = "Answer submission semantics move below the CLI"
 status = "ready"
 raised = "2026-09-03"
-content = '''
+content = """
 This plan separates GOALS from APPROACH. The GOALS section is binding: each
 names an observable outcome, what decides it, and what it excludes. The
 APPROACH section is the architect's suggested route — files, symbols, edit
@@ -69,8 +69,8 @@ to remove. This child relocates them once, behavior-preserving.
    assert.
 
 3. **Existing suites stay green.** Decided by the declared checks.
-'''
-scope = '''
+"""
+scope = """
 ## Decisions
 
 - Home is `ctx-traits-io` (beside `run.rs`/`run_control.rs`), not core: the
@@ -99,8 +99,8 @@ scope = '''
    proof_summons`, `CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli
    --lib dashboard`, then `just test`. In a run worktree, isolate the build
    cache (`CARGO_TARGET_DIR=target`) before trusting a gate failure.
-'''
-validation = '''
+"""
+validation = """
 ## Watch
 
 - Dependency direction: cli depends on io/core, never the reverse; no CLI
@@ -115,7 +115,7 @@ validation = '''
 - The shared implementation exists below the CLI, both existing consumers
   use it, and no duplicate remains.
 - `proof_summons`, the dashboard lib suite, and `just test` are green.
-'''
+"""
 
 [relations]
 parent = "0279"
