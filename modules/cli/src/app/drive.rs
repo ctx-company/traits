@@ -2672,6 +2672,17 @@ fn drive_loop(
                 // The durable park precedes this live refresh so a reader can
                 // always resolve the row's summons from the ledger.
                 notifier.frame_done();
+                if let Some(panel) = run_panel.0.as_ref() {
+                    // The bridge, rather than this drive thread, calls the
+                    // handler because it waits for the verdict produced below.
+                    answer_mailbox.set_accepting(true);
+                    open_summons_modal_bridge(
+                        panel.clone(),
+                        summons.clone(),
+                        outcome.session.state_digest.to_string(),
+                        answer_mailbox.handler(),
+                    );
+                }
                 let wait_exit = wait_for_answer_delivery(
                     answer_mailbox,
                     &attach_wait_paused,
@@ -5323,12 +5334,86 @@ fn wait_for_answer_delivery(
     }
 }
 
+/// Connect a live-panel Ask modal to the driver mailbox without letting the
+/// drive thread wait on its own delivery verdict.
+fn open_summons_modal_bridge(
+    panel: run_view::RunPanel,
+    summons: ctx_traits_core::procedure::session::SummonsRecord,
+    expected_state_digest: String,
+    handler: ctx_traits_io::run_control::AnswerHandler,
+) -> std::thread::JoinHandle<()> {
+    let title = summons.title.clone();
+    let body = format!(
+        "{}\n---\nanswer slot: {} (schema: {})",
+        summons.question,
+        summons.answer_slot,
+        summons.schema_ref.as_deref().unwrap_or("schema:any"),
+    );
+    let receiver = panel.request_input(title, body);
+    bridge_summons_modal_answer(panel, receiver, summons, expected_state_digest, handler)
+}
+
+fn bridge_summons_modal_answer(
+    panel: run_view::RunPanel,
+    receiver: std::sync::mpsc::Receiver<Option<String>>,
+    summons: ctx_traits_core::procedure::session::SummonsRecord,
+    expected_state_digest: String,
+    handler: ctx_traits_io::run_control::AnswerHandler,
+) -> std::thread::JoinHandle<()> {
+    std::thread::spawn(move || {
+        let Some(text) = receiver.recv().ok().flatten() else {
+            return;
+        };
+        let value = match ctx_traits_io::answer::parse_schema_aware_value(
+            &text,
+            summons.schema_ref.as_deref(),
+        ) {
+            Ok(value) => value,
+            Err(error) => {
+                panel.note(format!(
+                    "answer rejected for {}: {error}",
+                    summons.answer_slot
+                ));
+                return;
+            }
+        };
+        let verdict = handler(ctx_traits_io::answer::AnswerEnvelope {
+            target: summons.answer_slot.clone(),
+            schema_ref: summons.schema_ref.clone(),
+            expected_state_digest,
+            value,
+            caller: Some(ctx_traits_core::procedure::session::CallerProvenance::cli()),
+            existing_input_evidence: Some("ctx traits drive (live modal)".to_string()),
+        });
+        if verdict != ctx_traits_io::answer::AnswerDeliveryVerdict::Accepted {
+            panel.note(format!(
+                "answer not accepted for {}: {verdict:?}",
+                summons.answer_slot
+            ));
+        }
+    })
+}
+
 #[cfg(test)]
 mod answer_wait_tests {
     use std::cell::Cell;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
     use std::time::Duration;
 
-    use super::{AnswerWaitAction, AnswerWaitExit, wait_for_answer_delivery};
+    use super::{
+        AnswerWaitAction, AnswerWaitExit, bridge_summons_modal_answer, wait_for_answer_delivery,
+    };
+
+    fn summons() -> ctx_traits_core::procedure::session::SummonsRecord {
+        ctx_traits_core::procedure::session::SummonsRecord {
+            step_id: "ask".to_string(),
+            title: "Provide the answer".to_string(),
+            question: "What should happen?".to_string(),
+            answer_slot: "ask:answer".to_string(),
+            schema_ref: Some("schema:text".to_string()),
+        }
+    }
 
     #[test]
     fn accepted_delivery_resumes_and_excludes_parked_time() {
@@ -5381,6 +5466,68 @@ mod answer_wait_tests {
 
         assert_eq!(exit, AnswerWaitExit::Stopped);
         assert!(paused.get() > Duration::ZERO);
+    }
+
+    #[test]
+    fn modal_bridge_delivers_a_schema_aware_answer_through_the_mailbox() {
+        let panel = crate::app::run_view::tests::detached_panel_for_test();
+        let mailbox = ctx_traits_io::run_control::AnswerMailbox::new();
+        mailbox.set_accepting(true);
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let bridge = bridge_summons_modal_answer(
+            panel.clone(),
+            receiver,
+            summons(),
+            "digest".to_string(),
+            mailbox.handler(),
+        );
+        sender.send(Some("y".to_string())).expect("modal submit");
+        let paused = Cell::new(Duration::ZERO);
+        let exit = wait_for_answer_delivery(
+            &mailbox,
+            &paused,
+            || false,
+            |delivery| {
+                assert_eq!(delivery.envelope.target, "ask:answer");
+                assert_eq!(delivery.envelope.expected_state_digest, "digest");
+                assert_eq!(
+                    delivery.envelope.value,
+                    serde_json::Value::String("y".to_string())
+                );
+                delivery.reply(ctx_traits_io::answer::AnswerDeliveryVerdict::Accepted);
+                AnswerWaitAction::Accepted
+            },
+            || {},
+        );
+        assert_eq!(exit, AnswerWaitExit::Accepted);
+        bridge.join().expect("modal bridge");
+    }
+
+    #[test]
+    fn modal_bridge_cancel_leaves_the_wait_running_until_stopped() {
+        let panel = crate::app::run_view::tests::detached_panel_for_test();
+        let mailbox = ctx_traits_io::run_control::AnswerMailbox::new();
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let bridge = bridge_summons_modal_answer(
+            panel.clone(),
+            receiver,
+            summons(),
+            "digest".to_string(),
+            mailbox.handler(),
+        );
+        sender.send(None).expect("modal cancel");
+        bridge.join().expect("modal bridge");
+        let stop = Arc::new(AtomicBool::new(false));
+        let stop_after_tick = Arc::clone(&stop);
+        let paused = Cell::new(Duration::ZERO);
+        let exit = wait_for_answer_delivery(
+            &mailbox,
+            &paused,
+            || stop.load(Ordering::SeqCst),
+            |_| panic!("cancel must not deliver an envelope"),
+            || stop_after_tick.store(true, Ordering::SeqCst),
+        );
+        assert_eq!(exit, AnswerWaitExit::Stopped);
     }
 }
 
