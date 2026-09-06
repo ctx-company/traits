@@ -13,7 +13,7 @@ use ctx_traits_core::response::{CommandOutput, Envelope};
 use serde::Serialize;
 
 use ctx_traits_io::answer::{
-    route_answer, AnswerDeliveryVerdict, AnswerRouteOutcome, AnswerSubmission, HeldDeliveryPolicy,
+    AnswerDeliveryVerdict, AnswerRouteOutcome, AnswerSubmission, HeldDeliveryPolicy, route_answer,
 };
 
 use crate::app::command_handlers::print_json_report;
@@ -21,7 +21,7 @@ use crate::app::dashboard::resolve_answer_trait_file;
 use crate::app::frame_prompt::summons_question;
 use crate::app::lifecycle_reporting::current_utf8_dir;
 use crate::app::presentation::{
-    emit_human, wire_name, OutputMode, Panel, PanelRow, PanelStatus, RowTone,
+    OutputMode, Panel, PanelRow, PanelStatus, RowTone, emit_human, wire_name,
 };
 use crate::app::story;
 
