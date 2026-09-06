@@ -780,11 +780,11 @@ fn interrupting_a_waiting_driver_releases_the_lock_and_keeps_the_park() {
 fn resuming_an_interrupted_parked_ask_refires_the_same_question_and_completes() {
     let (fixture, run_json, _ledger_json) = build_and_run();
     assert_eq!(run_json["value"]["status"], "awaiting-owner");
-    let original_question = session_view(&read_ledger_json(&fixture))["last-drive-outcome"]
-        ["summons"]["question"]
-        .as_str()
-        .expect("initial parked Ask has a question")
-        .to_string();
+    let original_question =
+        session_view(&read_ledger_json(&fixture))["last-drive-outcome"]["summons"]["question"]
+            .as_str()
+            .expect("initial parked Ask has a question")
+            .to_string();
 
     let mut interrupted_ledger = read_ledger_json(&fixture);
     let session = if interrupted_ledger.get("session").is_some() {
@@ -794,8 +794,7 @@ fn resuming_an_interrupted_parked_ask_refires_the_same_question_and_completes() 
     } else {
         &mut interrupted_ledger
     };
-    session["last-drive-outcome"]["outcome"] =
-        serde_json::Value::String("interrupted".to_string());
+    session["last-drive-outcome"]["outcome"] = serde_json::Value::String("interrupted".to_string());
     fs::write(
         &fixture.ledger_path,
         serde_json::to_string_pretty(&interrupted_ledger).unwrap(),
@@ -803,12 +802,14 @@ fn resuming_an_interrupted_parked_ask_refires_the_same_question_and_completes() 
     .unwrap_or_else(|error| panic!("cannot stamp interrupted parked ledger: {error}"));
 
     let resumed_stdout = drive_to_park(&fixture);
-    assert_eq!(value_json(&resumed_stdout)["value"]["status"], "awaiting-owner");
+    assert_eq!(
+        value_json(&resumed_stdout)["value"]["status"],
+        "awaiting-owner"
+    );
     let refired_ledger = read_ledger_json(&fixture);
     let refired = session_view(&refired_ledger);
     assert_eq!(
-        refired["last-drive-outcome"]["summons"]["question"],
-        original_question,
+        refired["last-drive-outcome"]["summons"]["question"], original_question,
         "resuming must re-fire the same Ask question: {refired}"
     );
 
@@ -828,7 +829,10 @@ fn resuming_an_interrupted_parked_ask_refires_the_same_question_and_completes() 
     let answer_json = value_json(&answer_stdout);
     assert_eq!(answer_json["value"]["submitted"], true);
     assert_eq!(answer_json["value"]["resumed-status"], "completed");
-    assert_eq!(session_view(&read_ledger_json(&fixture))["status"], "completed");
+    assert_eq!(
+        session_view(&read_ledger_json(&fixture))["status"],
+        "completed"
+    );
 }
 
 /// A signal-gated `ask` step parks the run `awaiting-owner` (not a run
