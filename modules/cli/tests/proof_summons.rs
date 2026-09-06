@@ -773,6 +773,64 @@ fn interrupting_a_waiting_driver_releases_the_lock_and_keeps_the_park() {
     );
 }
 
+/// An interrupted parked Ask is resumable even when a recovery path has
+/// stamped its last outcome interrupted: re-driving restores the durable park
+/// before the owner answers the unchanged question.
+#[test]
+fn resuming_an_interrupted_parked_ask_refires_the_same_question_and_completes() {
+    let (fixture, run_json, _ledger_json) = build_and_run();
+    assert_eq!(run_json["value"]["status"], "awaiting-owner");
+    let original_question = session_view(&read_ledger_json(&fixture))["last-drive-outcome"]
+        ["summons"]["question"]
+        .as_str()
+        .expect("initial parked Ask has a question")
+        .to_string();
+
+    let mut interrupted_ledger = read_ledger_json(&fixture);
+    let session = if interrupted_ledger.get("session").is_some() {
+        interrupted_ledger
+            .get_mut("session")
+            .expect("session key present")
+    } else {
+        &mut interrupted_ledger
+    };
+    session["last-drive-outcome"]["outcome"] =
+        serde_json::Value::String("interrupted".to_string());
+    fs::write(
+        &fixture.ledger_path,
+        serde_json::to_string_pretty(&interrupted_ledger).unwrap(),
+    )
+    .unwrap_or_else(|error| panic!("cannot stamp interrupted parked ledger: {error}"));
+
+    let resumed_stdout = drive_to_park(&fixture);
+    assert_eq!(value_json(&resumed_stdout)["value"]["status"], "awaiting-owner");
+    let refired_ledger = read_ledger_json(&fixture);
+    let refired = session_view(&refired_ledger);
+    assert_eq!(
+        refired["last-drive-outcome"]["summons"]["question"],
+        original_question,
+        "resuming must re-fire the same Ask question: {refired}"
+    );
+
+    let answer_stdout = require_success(
+        "`ctx traits answer <session> --value --json` after interrupted Ask resume",
+        &[
+            "traits",
+            "answer",
+            fixture.ledger_path.to_str().unwrap(),
+            "--value",
+            "do the thing",
+            "--json",
+        ],
+        &fixture.proj,
+        &fixture.home,
+    );
+    let answer_json = value_json(&answer_stdout);
+    assert_eq!(answer_json["value"]["submitted"], true);
+    assert_eq!(answer_json["value"]["resumed-status"], "completed");
+    assert_eq!(session_view(&read_ledger_json(&fixture))["status"], "completed");
+}
+
 /// A signal-gated `ask` step parks the run `awaiting-owner` (not a run
 /// failure), with the outcome durable in the ledger re-read off disk.
 #[test]
@@ -1148,13 +1206,11 @@ fn answer_falls_back_to_live_resolution_when_the_stored_summons_record_is_absent
     assert_eq!(bare_json["value"]["answer-slot"], "slot:ask-owner");
 }
 
-/// P0253.4 blocker 2 (shared-answer-submission-semantics): a summons whose
-/// last recorded outcome is `interrupted`/`killed` (a center repair, an
-/// interrupt, a kill — simulated here by editing the outcome directly) must
-/// be refused as cancelled, not shown or answered, even though its frame is
-/// still shaped like a live Ask.
+/// An interrupted parked Ask is not answerable until a resume restores its
+/// durable `AwaitingOwner` evidence. It is resumable, rather than terminally
+/// cancelled, even though its frame is still shaped like a live Ask.
 #[test]
-fn answer_refuses_a_cancelled_summons() {
+fn answer_refuses_an_interrupted_parked_ask_pending_resume() {
     let (fixture, run_json, _ledger_json) = build_and_run();
     assert_eq!(run_json["value"]["status"], "awaiting-owner");
 
@@ -1181,12 +1237,12 @@ fn answer_refuses_a_cancelled_summons() {
     );
     assert!(
         !output.status.success(),
-        "answer must refuse a cancelled summons"
+        "answer must refuse an interrupted Ask until it is resumed"
     );
     let (_, stderr) = utf8(&output);
     assert!(
-        stderr.contains("was cancelled"),
-        "expected a cancellation refusal, got: {stderr}"
+        !stderr.contains("was cancelled"),
+        "an interrupted parked Ask must not be described as terminally cancelled: {stderr}"
     );
 }
 
