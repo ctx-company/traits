@@ -2365,7 +2365,7 @@ fn one_driver_frame_notification_reaches_two_subscribers() {
             branch: None,
             log_path: None,
         },
-        std::sync::Arc::new(|_| {}),
+        ctx_traits_io::run_control::ControlHandlers::command_only(std::sync::Arc::new(|_| {})),
     )
     .expect("acquire driver lock")
     .expect("test owns driver lock");
@@ -4057,8 +4057,11 @@ fn restarted_center_accepts_the_next_driver_registration_and_frame() {
     // ownership failure.
     let acquire_deadline = Instant::now() + PROCESS_DEADLINE;
     let driver_lock = loop {
-        match ctx_traits_io::run_control::try_acquire(&facts, std::sync::Arc::new(|_| {}))
-            .expect("acquire driver lock")
+        match ctx_traits_io::run_control::try_acquire(
+            &facts,
+            ctx_traits_io::run_control::ControlHandlers::command_only(std::sync::Arc::new(|_| {})),
+        )
+        .expect("acquire driver lock")
         {
             Some(lock) => break lock,
             None if Instant::now() < acquire_deadline => {

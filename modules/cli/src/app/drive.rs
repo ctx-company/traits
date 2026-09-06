@@ -1218,14 +1218,16 @@ pub fn drive(input: DriveInputs<'_>) -> crate::Result<DriveReport> {
     };
     let driver_lock = ctx_traits_io::run_control::try_acquire(
         &live_facts,
-        std::sync::Arc::new(|command| match command {
-            ctx_traits_io::run_control::ControlCommand::Interrupt => {
-                crate::app::interrupt::request_stop()
+        ctx_traits_io::run_control::ControlHandlers::command_only(std::sync::Arc::new(|command| {
+            match command {
+                ctx_traits_io::run_control::ControlCommand::Interrupt => {
+                    crate::app::interrupt::request_stop()
+                }
+                ctx_traits_io::run_control::ControlCommand::Pause => {
+                    crate::app::interrupt::request_pause()
+                }
             }
-            ctx_traits_io::run_control::ControlCommand::Pause => {
-                crate::app::interrupt::request_pause()
-            }
-        }),
+        })),
     )?;
     let Some(driver_lock) = driver_lock else {
         let mut report = DriveReport {

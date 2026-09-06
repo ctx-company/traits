@@ -475,10 +475,10 @@ mod tests {
         let held = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         let guard = crate::run_control::try_acquire(
             &facts("session-a", ledger_path.clone()),
-            std::sync::Arc::new({
+            crate::run_control::ControlHandlers::command_only(std::sync::Arc::new({
                 let held = held.clone();
                 move |_| held.store(true, std::sync::atomic::Ordering::SeqCst)
-            }),
+            })),
         )
         .expect("acquire driver lock")
         .expect("lock uncontended");

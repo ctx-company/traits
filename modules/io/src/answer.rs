@@ -28,7 +28,7 @@ pub struct AnswerEnvelope {
 }
 
 /// The result of delivering an answer to a waiting driver.
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum AnswerDeliveryVerdict {
     Accepted,
     Stale,
@@ -341,7 +341,8 @@ mod tests {
         let outcome = submit_answer(AnswerSubmission {
             ledger_path: &ledger_path, trait_file: None, session_store: None, target: "slot:ask-owner",
             schema_ref: Some("schema:text"),
-            expected_state_digest: "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+            expected_state_digest:
+                "sha256:0000000000000000000000000000000000000000000000000000000000000000",
             value: serde_json::Value::String("do the thing".to_string()),
             caller: CallerProvenance { surface: "test".to_string(), caller: "answer-test".to_string(), agent: None, harness: None },
             existing_input_evidence: "answer-test", advance_command_frames: true,
@@ -366,8 +367,7 @@ mod tests {
             session_store: None,
             target: "slot:ask-owner",
             schema_ref: Some("schema:text"),
-            expected_state_digest:
-                "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+            expected_state_digest: "sha256:0000000000000000000000000000000000000000000000000000000000000000",
             value: serde_json::Value::String("do the thing".to_string()),
             caller: CallerProvenance {
                 surface: "test".to_string(),

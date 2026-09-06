@@ -39,12 +39,14 @@
 //! (crashed holder, handed-off lock, no holder at all) can never be
 //! connected to, so it can never be mistaken for a live target.
 
+use crate::answer::{AnswerDeliveryVerdict, AnswerEnvelope};
 use camino::{Utf8Path, Utf8PathBuf};
 use std::io::{Read, Write};
 use std::os::unix::fs::{DirBuilderExt, MetadataExt};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, SyncSender};
 use std::time::Duration;
 
 /// Cooperative command selected by the authenticated control socket byte.
@@ -92,6 +94,103 @@ const CONTROL_CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
 /// its interrupt or pause callback. Control requests treat anything else — including a
 /// partial or missing read — as "not confirmed".
 const CONTROL_ACK: &[u8] = b"ok";
+
+/// Largest answer payload accepted from the local control socket.
+const MAX_ANSWER_PAYLOAD_BYTES: usize = 1024 * 1024;
+
+/// How long the listener waits for the drive thread to validate a delivered
+/// answer. A disconnected or stalled drive must not retain the accept thread.
+const ANSWER_DELIVERY_TIMEOUT: Duration = Duration::from_secs(10);
+
+pub type AnswerHandler = Arc<dyn Fn(AnswerEnvelope) -> AnswerDeliveryVerdict + Send + Sync>;
+
+/// Callbacks owned by a driver while it holds the control socket.
+pub struct ControlHandlers {
+    on_command: Arc<dyn Fn(ControlCommand) + Send + Sync>,
+    on_answer: Option<AnswerHandler>,
+}
+
+impl ControlHandlers {
+    /// Build the handlers used by drivers that do not accept answer delivery.
+    pub fn command_only(on_command: Arc<dyn Fn(ControlCommand) + Send + Sync>) -> Self {
+        Self {
+            on_command,
+            on_answer: None,
+        }
+    }
+
+    /// Add an answer callback to the ordinary command handler.
+    pub fn with_answer(mut self, on_answer: AnswerHandler) -> Self {
+        self.on_answer = Some(on_answer);
+        self
+    }
+}
+
+/// An answer sent by the control listener for the drive thread to process.
+pub struct AnswerDelivery {
+    pub envelope: AnswerEnvelope,
+    reply: SyncSender<AnswerDeliveryVerdict>,
+}
+
+impl AnswerDelivery {
+    /// Return the verdict to the listener that delivered this answer.
+    pub fn reply(self, verdict: AnswerDeliveryVerdict) {
+        let _ = self.reply.send(verdict);
+    }
+}
+
+/// Handoff between the socket listener and its single ledger-writing drive
+/// thread. The listener only queues delivery and waits for a verdict.
+pub struct AnswerMailbox {
+    accepting: Arc<AtomicBool>,
+    sender: SyncSender<AnswerDelivery>,
+    receiver: Receiver<AnswerDelivery>,
+}
+
+impl AnswerMailbox {
+    pub fn new() -> Self {
+        let (sender, receiver) = mpsc::sync_channel(1);
+        Self {
+            accepting: Arc::new(AtomicBool::new(false)),
+            sender,
+            receiver,
+        }
+    }
+
+    /// Toggle delivery only for the interval where the drive is parked at an
+    /// Ask frame. A request outside that interval is refused without waking it.
+    pub fn set_accepting(&self, accepting: bool) {
+        self.accepting.store(accepting, Ordering::SeqCst);
+    }
+
+    pub fn recv_timeout(&self, timeout: Duration) -> Result<AnswerDelivery, RecvTimeoutError> {
+        self.receiver.recv_timeout(timeout)
+    }
+
+    pub fn handler(&self) -> AnswerHandler {
+        let accepting = Arc::clone(&self.accepting);
+        let sender = self.sender.clone();
+        Arc::new(move |envelope| {
+            if !accepting.load(Ordering::SeqCst) {
+                return AnswerDeliveryVerdict::NotWaiting;
+            }
+            let (reply, response) = mpsc::sync_channel(1);
+            if sender.send(AnswerDelivery { envelope, reply }).is_err() {
+                return AnswerDeliveryVerdict::NotWaiting;
+            }
+            response
+                .recv_timeout(ANSWER_DELIVERY_TIMEOUT)
+                .unwrap_or(AnswerDeliveryVerdict::NotWaiting)
+        })
+    }
+}
+
+/// Result of asking a live driver to deliver an answer.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum AnswerDeliveryResult {
+    Delivered(AnswerDeliveryVerdict),
+    Undelivered,
+}
 
 /// Best-effort holder metadata written while a driver lock is held. Never
 /// canonical/ledger state — only a display/probe aid. `control_token` also
@@ -248,6 +347,7 @@ pub fn ensure_runtime_root(root: &Utf8Path) -> crate::Result<()> {
 fn bind_control_listener(
     socket_path: Utf8PathBuf,
     on_command: Arc<dyn Fn(ControlCommand) + Send + Sync>,
+    on_answer: Option<AnswerHandler>,
 ) -> crate::Result<ControlListener> {
     if let Some(parent) = socket_path.parent() {
         ensure_runtime_root(parent)?;
@@ -291,10 +391,22 @@ fn bind_control_listener(
                         .ok()
                         .filter(|count| *count == 1)
                         .is_some()
-                        && let Some(command) = ControlCommand::from_wire(byte[0])
                     {
-                        on_command(command);
-                        let _ = stream.write_all(CONTROL_ACK);
+                        if let Some(command) = ControlCommand::from_wire(byte[0]) {
+                            on_command(command);
+                            let _ = stream.write_all(CONTROL_ACK);
+                        } else if byte[0] == b'a'
+                            && let Some(on_answer) = on_answer.as_ref()
+                            && let Some(envelope) = read_answer_envelope(&mut stream)
+                        {
+                            if let Ok(body) = serde_json::to_vec(&on_answer(envelope)) {
+                                let Ok(length) = u32::try_from(body.len()) else {
+                                    return;
+                                };
+                                let _ = stream.write_all(&length.to_be_bytes());
+                                let _ = stream.write_all(&body);
+                            }
+                        }
                     }
                 }
                 Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
@@ -311,6 +423,18 @@ fn bind_control_listener(
         stop,
         thread: Some(thread),
     })
+}
+
+fn read_answer_envelope(stream: &mut UnixStream) -> Option<AnswerEnvelope> {
+    let mut length = [0u8; 4];
+    stream.read_exact(&mut length).ok()?;
+    let length = u32::from_be_bytes(length) as usize;
+    if length > MAX_ANSWER_PAYLOAD_BYTES {
+        return None;
+    }
+    let mut body = vec![0u8; length];
+    stream.read_exact(&mut body).ok()?;
+    serde_json::from_slice(&body).ok()
 }
 
 /// Outcome of probing a ledger's driver lock without attempting to hold it.
@@ -412,7 +536,7 @@ fn random_token() -> String {
 /// index write) rather than surfaced as an error here.
 pub fn try_acquire(
     facts: &crate::run_liveness::LiveRunFacts,
-    on_command: Arc<dyn Fn(ControlCommand) + Send + Sync>,
+    handlers: ControlHandlers,
 ) -> crate::Result<Option<DriverLockGuard>> {
     let ledger_path = facts.ledger_path.as_path();
     let session_id = facts.session_id.as_str();
@@ -457,8 +581,12 @@ pub fn try_acquire(
     // The ledger flock remains authoritative even when the disposable local
     // control root cannot be used. A driver must keep progressing in that
     // case; only machine-local interrupt and liveness visibility are absent.
-    let control =
-        bind_control_listener(control_socket_path(ledger_path, &control_token), on_command).ok();
+    let control = bind_control_listener(
+        control_socket_path(ledger_path, &control_token),
+        handlers.on_command,
+        handlers.on_answer,
+    )
+    .ok();
     let pid = std::process::id();
     let started_at_epoch = epoch_secs();
     // Best-effort, matching every other liveness-index write policy: an
@@ -587,13 +715,59 @@ pub fn request_pause(ledger_path: &Utf8Path, holder: &DriverHolder) -> crate::Re
     request_control(ledger_path, holder, ControlCommand::Pause)
 }
 
+/// Deliver an answer to the driver identified by an already-probed holder.
+/// A missing socket, a pre-answer driver, or any incomplete round trip is
+/// `Undelivered`; only a parsed typed verdict counts as a delivery.
+pub fn request_answer(
+    ledger_path: &Utf8Path,
+    holder: &DriverHolder,
+    envelope: &AnswerEnvelope,
+) -> crate::Result<AnswerDeliveryResult> {
+    let Some(mut stream) = connect_control(ledger_path, holder)? else {
+        return Ok(AnswerDeliveryResult::Undelivered);
+    };
+    let payload = serde_json::to_vec(envelope).expect("answer envelope serializes");
+    let Ok(length) = u32::try_from(payload.len()) else {
+        return Ok(AnswerDeliveryResult::Undelivered);
+    };
+    if stream
+        .write_all(b"a")
+        .and_then(|_| stream.write_all(&length.to_be_bytes()))
+        .and_then(|_| stream.write_all(&payload))
+        .is_err()
+    {
+        return Ok(AnswerDeliveryResult::Undelivered);
+    }
+    let Some(verdict) = read_answer_verdict(&mut stream) else {
+        return Ok(AnswerDeliveryResult::Undelivered);
+    };
+    Ok(AnswerDeliveryResult::Delivered(verdict))
+}
+
 fn request_control(
     ledger_path: &Utf8Path,
     holder: &DriverHolder,
     command: ControlCommand,
 ) -> crate::Result<bool> {
-    if holder.control_token.is_empty() {
+    let Some(mut stream) = connect_control(ledger_path, holder)? else {
         return Ok(false);
+    };
+    if stream.write_all(&[command.wire()]).is_err() {
+        return Ok(false);
+    }
+    let mut ack = [0u8; CONTROL_ACK.len()];
+    if stream.read_exact(&mut ack).is_err() {
+        return Ok(false);
+    }
+    Ok(ack == CONTROL_ACK)
+}
+
+fn connect_control(
+    ledger_path: &Utf8Path,
+    holder: &DriverHolder,
+) -> crate::Result<Option<UnixStream>> {
+    if holder.control_token.is_empty() {
+        return Ok(None);
     }
     let socket_path = control_socket_path(ledger_path, &holder.control_token);
     let (tx, rx) = std::sync::mpsc::channel();
@@ -609,7 +783,7 @@ fn request_control(
                 std::io::ErrorKind::NotFound | std::io::ErrorKind::ConnectionRefused
             ) =>
         {
-            return Ok(false);
+            return Ok(None);
         }
         Ok(Err(e)) => {
             return Err(crate::environment::Error::Filesystem {
@@ -621,19 +795,23 @@ fn request_control(
         // Timed out waiting for connect, or the connect thread's sender
         // dropped without sending (should not happen, but never block
         // forever either way): treat as "nothing confirmed interrupted".
-        Err(_) => return Ok(false),
+        Err(_) => return Ok(None),
     };
-    let mut stream = stream;
     let _ = stream.set_read_timeout(Some(CONTROL_STREAM_TIMEOUT));
     let _ = stream.set_write_timeout(Some(CONTROL_STREAM_TIMEOUT));
-    if stream.write_all(&[command.wire()]).is_err() {
-        return Ok(false);
+    Ok(Some(stream))
+}
+
+fn read_answer_verdict(stream: &mut UnixStream) -> Option<AnswerDeliveryVerdict> {
+    let mut length = [0u8; 4];
+    stream.read_exact(&mut length).ok()?;
+    let length = u32::from_be_bytes(length) as usize;
+    if length > MAX_ANSWER_PAYLOAD_BYTES {
+        return None;
     }
-    let mut ack = [0u8; CONTROL_ACK.len()];
-    if stream.read_exact(&mut ack).is_err() {
-        return Ok(false);
-    }
-    Ok(ack == CONTROL_ACK)
+    let mut body = vec![0u8; length];
+    stream.read_exact(&mut body).ok()?;
+    serde_json::from_slice(&body).ok()
 }
 
 fn epoch_secs() -> u64 {
@@ -669,6 +847,7 @@ mod tests {
             Arc::new(move |_| {
                 observed.store(true, Ordering::SeqCst);
             }),
+            None,
         )
         .expect("bind replacement listener");
 
@@ -708,6 +887,7 @@ mod tests {
             Arc::new(move |_| {
                 observed.store(true, Ordering::SeqCst);
             }),
+            None,
         )
         .expect("bind listener");
         std::thread::sleep(CONTROL_POLL_INTERVAL);
@@ -738,6 +918,7 @@ mod tests {
         let listener = bind_control_listener(
             control_socket_path(&ledger_path, &holder.control_token),
             Arc::new(move |command| *observed.lock().expect("lock") = Some(command)),
+            None,
         )
         .expect("bind listener");
         let deadline = std::time::Instant::now() + CONTROL_STREAM_TIMEOUT;
@@ -754,6 +935,237 @@ mod tests {
             "listener did not acknowledge pause before its deadline"
         );
         assert_eq!(*seen.lock().expect("lock"), Some(ControlCommand::Pause));
+        drop(listener);
+    }
+
+    #[test]
+    fn answer_wire_delivers_envelope_and_returns_length_prefixed_verdict() {
+        let path = control_socket_path(
+            Utf8Path::new("/tmp/ctx-control-answer.json"),
+            &format!("answer-{}", std::process::id()),
+        );
+        let observed = Arc::new(std::sync::Mutex::new(None));
+        let received = Arc::clone(&observed);
+        let listener = bind_control_listener(
+            path.clone(),
+            Arc::new(|_| panic!("answer must not invoke command handler")),
+            Some(Arc::new(move |envelope| {
+                *received.lock().expect("lock") = Some(envelope);
+                AnswerDeliveryVerdict::Accepted
+            })),
+        )
+        .expect("bind listener");
+        std::thread::sleep(CONTROL_POLL_INTERVAL);
+
+        let envelope = AnswerEnvelope {
+            target: "slot:ask-owner".to_string(),
+            schema_ref: Some("schema:text".to_string()),
+            expected_state_digest: "sha256:digest".to_string(),
+            value: serde_json::Value::String("answer".to_string()),
+        };
+        let payload = serde_json::to_vec(&envelope).expect("serialize envelope");
+        let mut stream = UnixStream::connect(path.as_std_path()).expect("connect listener");
+        stream.write_all(b"a").expect("write answer discriminator");
+        stream
+            .write_all(&(payload.len() as u32).to_be_bytes())
+            .expect("write answer length");
+        stream.write_all(&payload).expect("write answer payload");
+        let mut length = [0u8; 4];
+        stream.read_exact(&mut length).expect("read verdict length");
+        let mut response = vec![0; u32::from_be_bytes(length) as usize];
+        stream.read_exact(&mut response).expect("read verdict");
+        assert_eq!(
+            serde_json::from_slice::<AnswerDeliveryVerdict>(&response).expect("parse verdict"),
+            AnswerDeliveryVerdict::Accepted
+        );
+        assert_eq!(*observed.lock().expect("lock"), Some(envelope));
+        drop(listener);
+    }
+
+    #[test]
+    fn request_answer_round_trips_each_delivery_verdict() {
+        let ledger_path = Utf8PathBuf::from(format!(
+            "/tmp/ctx-control-answer-verdicts-{}.json",
+            std::process::id()
+        ));
+        let envelope = AnswerEnvelope {
+            target: "slot:ask-owner".to_string(),
+            schema_ref: None,
+            expected_state_digest: "sha256:digest".to_string(),
+            value: serde_json::Value::Null,
+        };
+        let verdicts = [
+            AnswerDeliveryVerdict::Accepted,
+            AnswerDeliveryVerdict::Stale,
+            AnswerDeliveryVerdict::Cancelled,
+            AnswerDeliveryVerdict::NotWaiting,
+            AnswerDeliveryVerdict::RejectedCorrection {
+                detail: "correction required".to_string(),
+            },
+            AnswerDeliveryVerdict::NotRouted,
+        ];
+        for (index, verdict) in verdicts.into_iter().enumerate() {
+            let holder = DriverHolder {
+                pid: std::process::id(),
+                session_id: "session".to_string(),
+                run_id: "run".to_string(),
+                started_at_epoch_secs: 0,
+                control_token: format!("answer-verdict-{}-{index}", std::process::id()),
+            };
+            let callback_verdict = verdict.clone();
+            let listener = bind_control_listener(
+                control_socket_path(&ledger_path, &holder.control_token),
+                Arc::new(|_| panic!("answer must not invoke command handler")),
+                Some(Arc::new(move |_| callback_verdict.clone())),
+            )
+            .expect("bind listener");
+            std::thread::sleep(CONTROL_POLL_INTERVAL);
+            assert_eq!(
+                request_answer(&ledger_path, &holder, &envelope).expect("request answer"),
+                AnswerDeliveryResult::Delivered(verdict)
+            );
+            drop(listener);
+        }
+    }
+
+    #[test]
+    fn mailbox_refuses_when_not_accepting_and_hands_accepted_delivery_to_drive() {
+        let ledger_path = Utf8PathBuf::from(format!(
+            "/tmp/ctx-control-mailbox-{}.json",
+            std::process::id()
+        ));
+        let holder = DriverHolder {
+            pid: std::process::id(),
+            session_id: "session".to_string(),
+            run_id: "run".to_string(),
+            started_at_epoch_secs: 0,
+            control_token: format!("mailbox-{}", std::process::id()),
+        };
+        let mailbox = AnswerMailbox::new();
+        let listener = bind_control_listener(
+            control_socket_path(&ledger_path, &holder.control_token),
+            Arc::new(|_| panic!("answer must not invoke command handler")),
+            Some(mailbox.handler()),
+        )
+        .expect("bind listener");
+        std::thread::sleep(CONTROL_POLL_INTERVAL);
+        let envelope = AnswerEnvelope {
+            target: "slot:ask-owner".to_string(),
+            schema_ref: None,
+            expected_state_digest: "sha256:digest".to_string(),
+            value: serde_json::Value::Bool(true),
+        };
+        assert_eq!(
+            request_answer(&ledger_path, &holder, &envelope).expect("request while idle"),
+            AnswerDeliveryResult::Delivered(AnswerDeliveryVerdict::NotWaiting)
+        );
+
+        mailbox.set_accepting(true);
+        let request_ledger = ledger_path.clone();
+        let request_holder = holder.clone();
+        let request_envelope = envelope.clone();
+        let request = std::thread::spawn(move || {
+            request_answer(&request_ledger, &request_holder, &request_envelope)
+                .expect("request while accepting")
+        });
+        let received = mailbox
+            .recv_timeout(CONTROL_STREAM_TIMEOUT)
+            .expect("drive receives answer");
+        assert_eq!(received.envelope, envelope);
+        received.reply(AnswerDeliveryVerdict::Accepted);
+        assert_eq!(
+            request.join().expect("join requester"),
+            AnswerDeliveryResult::Delivered(AnswerDeliveryVerdict::Accepted)
+        );
+        drop(listener);
+    }
+
+    #[test]
+    fn request_answer_to_a_legacy_listener_is_undelivered() {
+        let ledger_path = Utf8PathBuf::from(format!(
+            "/tmp/ctx-control-answer-legacy-{}.json",
+            std::process::id()
+        ));
+        let holder = DriverHolder {
+            pid: std::process::id(),
+            session_id: "session".to_string(),
+            run_id: "run".to_string(),
+            started_at_epoch_secs: 0,
+            control_token: format!("answer-legacy-{}", std::process::id()),
+        };
+        let listener = bind_control_listener(
+            control_socket_path(&ledger_path, &holder.control_token),
+            Arc::new(|_| {}),
+            None,
+        )
+        .expect("bind listener");
+        std::thread::sleep(CONTROL_POLL_INTERVAL);
+        assert_eq!(
+            request_answer(
+                &ledger_path,
+                &holder,
+                &AnswerEnvelope {
+                    target: "slot:ask-owner".to_string(),
+                    schema_ref: None,
+                    expected_state_digest: "sha256:digest".to_string(),
+                    value: serde_json::Value::Null,
+                },
+            )
+            .expect("request answer"),
+            AnswerDeliveryResult::Undelivered
+        );
+        let missing_holder = DriverHolder {
+            control_token: format!("missing-answer-{}", std::process::id()),
+            ..holder.clone()
+        };
+        assert_eq!(
+            request_answer(
+                &ledger_path,
+                &missing_holder,
+                &AnswerEnvelope {
+                    target: "slot:ask-owner".to_string(),
+                    schema_ref: None,
+                    expected_state_digest: "sha256:digest".to_string(),
+                    value: serde_json::Value::Null,
+                },
+            )
+            .expect("request missing answer socket"),
+            AnswerDeliveryResult::Undelivered
+        );
+        drop(listener);
+    }
+
+    #[test]
+    fn malformed_answer_payload_invokes_no_callback_and_returns_no_verdict() {
+        let path = control_socket_path(
+            Utf8Path::new("/tmp/ctx-control-malformed-answer.json"),
+            &format!("malformed-answer-{}", std::process::id()),
+        );
+        let called = Arc::new(AtomicBool::new(false));
+        let observed = Arc::clone(&called);
+        let listener = bind_control_listener(
+            path.clone(),
+            Arc::new(|_| panic!("malformed answer must not invoke command handler")),
+            Some(Arc::new(move |_| {
+                observed.store(true, Ordering::SeqCst);
+                AnswerDeliveryVerdict::Accepted
+            })),
+        )
+        .expect("bind listener");
+        std::thread::sleep(CONTROL_POLL_INTERVAL);
+
+        let mut stream = UnixStream::connect(path.as_std_path()).expect("connect listener");
+        stream.write_all(b"a").expect("write answer discriminator");
+        stream
+            .write_all(&4u32.to_be_bytes())
+            .expect("write malformed length");
+        stream.write_all(b"nope").expect("write malformed JSON");
+        stream
+            .set_read_timeout(Some(CONTROL_STREAM_TIMEOUT))
+            .expect("set timeout");
+        let mut verdict = [0u8; 1];
+        assert!(stream.read_exact(&mut verdict).is_err());
+        assert!(!called.load(Ordering::SeqCst));
         drop(listener);
     }
 }
