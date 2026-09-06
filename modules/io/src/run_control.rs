@@ -175,7 +175,9 @@ impl AnswerMailbox {
                 return AnswerDeliveryVerdict::NotWaiting;
             }
             let (reply, response) = mpsc::sync_channel(1);
-            if sender.send(AnswerDelivery { envelope, reply }).is_err() {
+            // A prior delivery may be waiting for the drive thread. Do not
+            // let that full one-slot queue bypass the listener's time bound.
+            if sender.try_send(AnswerDelivery { envelope, reply }).is_err() {
                 return AnswerDeliveryVerdict::NotWaiting;
             }
             response

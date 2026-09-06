@@ -1216,6 +1216,7 @@ pub fn drive(input: DriveInputs<'_>) -> crate::Result<DriveReport> {
             .map(|w| w.branch.clone()),
         log_path: std::env::var(ctx_traits_io::run_liveness::SPAWNED_LOG_PATH_ENV).ok(),
     };
+    let answer_mailbox = ctx_traits_io::run_control::AnswerMailbox::new();
     let driver_lock = ctx_traits_io::run_control::try_acquire(
         &live_facts,
         ctx_traits_io::run_control::ControlHandlers::command_only(std::sync::Arc::new(|command| {
@@ -1227,7 +1228,8 @@ pub fn drive(input: DriveInputs<'_>) -> crate::Result<DriveReport> {
                     crate::app::interrupt::request_pause()
                 }
             }
-        })),
+        }))
+        .with_answer(answer_mailbox.handler()),
     )?;
     let Some(driver_lock) = driver_lock else {
         let mut report = DriveReport {
@@ -1393,6 +1395,8 @@ pub fn drive(input: DriveInputs<'_>) -> crate::Result<DriveReport> {
         &activity,
         run_panel.0.take(),
         &pending_title,
+        &answer_mailbox,
+        &notifier,
     );
     // Last chance to write down a title that arrived after the final frame —
     // and the only chance for a run short enough to have no frame boundary
@@ -1621,6 +1625,26 @@ fn compose_summons_record(
         answer_slot: output.slot_ref.to_string(),
         schema_ref: output.schema_ref.clone(),
     })
+}
+
+/// Stamp the live Ask park before the driver waits, and again after a rejected
+/// correction because `run::set` rebuilds the session without its prior marker.
+fn record_awaiting_owner_park(
+    input: &DriveInputs<'_>,
+    summons: ctx_traits_core::procedure::session::SummonsRecord,
+) -> crate::Result<()> {
+    ctx_traits_io::run_session::record_drive_outcome(
+        input.session,
+        input.session_store,
+        "awaiting-owner",
+        None,
+        None,
+        ctx_traits_core::procedure::session::DriveTerminalEvidence {
+            summons: Some(summons),
+            ..Default::default()
+        },
+    )?;
+    Ok(())
 }
 
 fn drive_report_exit_code(status: &str) -> u8 {
@@ -2135,6 +2159,8 @@ fn drive_loop(
     activity: &ActivityRecorder,
     initial_run_panel: Option<run_view::RunPanel>,
     pending_title: &PendingSessionTitle,
+    answer_mailbox: &ctx_traits_io::run_control::AnswerMailbox,
+    notifier: &ctx_traits_io::center::DriverNotifier,
 ) -> crate::Result<DriveReport> {
     let mut input = input;
     let tui_degraded_to_status =
@@ -2633,6 +2659,73 @@ fn drive_loop(
                 return Ok(report);
             }
             ctx_traits_core::procedure::session::Status::WaitingOnHuman => {
+                let Some(summons) =
+                    compose_summons_record(input.session, input.session_store, input.file)
+                else {
+                    report.status = "awaiting-owner".to_string();
+                    return Ok(report);
+                };
+                if record_awaiting_owner_park(&input, summons.clone()).is_err() {
+                    report.status = "awaiting-owner".to_string();
+                    return Ok(report);
+                }
+                // The durable park precedes this live refresh so a reader can
+                // always resolve the row's summons from the ledger.
+                notifier.frame_done();
+                let wait_exit = wait_for_answer_delivery(
+                    answer_mailbox,
+                    &attach_wait_paused,
+                    || {
+                        crate::app::interrupt::is_interrupted()
+                            || crate::app::interrupt::is_paused()
+                    },
+                    |delivery| {
+                        let submission = ctx_traits_io::answer::AnswerSubmission {
+                            ledger_path,
+                            trait_file: input.file,
+                            session_store: input.session_store,
+                            target: &delivery.envelope.target,
+                            schema_ref: delivery.envelope.schema_ref.as_deref(),
+                            expected_state_digest: &delivery.envelope.expected_state_digest,
+                            value: delivery.envelope.value.clone(),
+                            caller: ctx_traits_core::procedure::session::CallerProvenance::cli(),
+                            existing_input_evidence: "ctx traits internal drive (control answer)",
+                            advance_command_frames: true,
+                        };
+                        let answer_outcome =
+                            ctx_traits_io::answer::apply_answer_transaction(submission);
+                        let verdict = answer_outcome
+                            .as_ref()
+                            .map(ctx_traits_io::answer::AnswerDeliveryVerdict::from)
+                            .unwrap_or(ctx_traits_io::answer::AnswerDeliveryVerdict::NotRouted);
+                        let accepted = matches!(
+                            answer_outcome,
+                            Ok(ctx_traits_io::answer::AnswerSubmissionOutcome::Submitted { .. })
+                        );
+                        let rejected_correction = matches!(
+                            answer_outcome,
+                            Ok(ctx_traits_io::answer::AnswerSubmissionOutcome::RejectedCorrection)
+                        );
+                        let park_restored = !rejected_correction
+                            || record_awaiting_owner_park(&input, summons.clone()).is_ok();
+                        delivery.reply(verdict);
+                        if accepted {
+                            AnswerWaitAction::Accepted
+                        } else if !park_restored {
+                            AnswerWaitAction::Stop
+                        } else {
+                            AnswerWaitAction::Continue
+                        }
+                    },
+                    || {
+                        if let Some(panel) = run_panel.0.as_ref() {
+                            panel.tick();
+                        }
+                    },
+                );
+                if wait_exit == AnswerWaitExit::Accepted {
+                    continue 'frames;
+                }
                 report.status = "awaiting-owner".to_string();
                 return Ok(report);
             }
@@ -5161,6 +5254,120 @@ fn evaluate_budget_ceiling(
         }
     }
     None
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum AnswerWaitAction {
+    Accepted,
+    Continue,
+    Stop,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum AnswerWaitExit {
+    Accepted,
+    Stopped,
+}
+
+/// Wait on the drive thread while the control listener only queues answers.
+/// Every exit accrues the parked wall time, keeping human response time out of
+/// both wall-clock and frame budget accounting.
+fn wait_for_answer_delivery(
+    mailbox: &ctx_traits_io::run_control::AnswerMailbox,
+    attach_wait_paused: &std::cell::Cell<Duration>,
+    should_stop: impl Fn() -> bool,
+    mut handle_delivery: impl FnMut(ctx_traits_io::run_control::AnswerDelivery) -> AnswerWaitAction,
+    mut tick: impl FnMut(),
+) -> AnswerWaitExit {
+    let started = Instant::now();
+    mailbox.set_accepting(true);
+    loop {
+        if should_stop() {
+            mailbox.set_accepting(false);
+            attach_wait_paused.set(attach_wait_paused.get() + started.elapsed());
+            return AnswerWaitExit::Stopped;
+        }
+        match mailbox.recv_timeout(Duration::from_millis(200)) {
+            Ok(delivery) => match handle_delivery(delivery) {
+                AnswerWaitAction::Accepted => {
+                    mailbox.set_accepting(false);
+                    attach_wait_paused.set(attach_wait_paused.get() + started.elapsed());
+                    return AnswerWaitExit::Accepted;
+                }
+                AnswerWaitAction::Continue => {}
+                AnswerWaitAction::Stop => {
+                    mailbox.set_accepting(false);
+                    attach_wait_paused.set(attach_wait_paused.get() + started.elapsed());
+                    return AnswerWaitExit::Stopped;
+                }
+            },
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => tick(),
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                mailbox.set_accepting(false);
+                attach_wait_paused.set(attach_wait_paused.get() + started.elapsed());
+                return AnswerWaitExit::Stopped;
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod answer_wait_tests {
+    use std::cell::Cell;
+    use std::time::Duration;
+
+    use super::{AnswerWaitAction, AnswerWaitExit, wait_for_answer_delivery};
+
+    #[test]
+    fn accepted_delivery_resumes_and_excludes_parked_time() {
+        let mailbox = ctx_traits_io::run_control::AnswerMailbox::new();
+        let handler = mailbox.handler();
+        let sender = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(20));
+            handler(ctx_traits_io::answer::AnswerEnvelope {
+                target: "ask:answer".to_string(),
+                schema_ref: None,
+                expected_state_digest: "digest".to_string(),
+                value: serde_json::Value::Null,
+            })
+        });
+        let paused = Cell::new(Duration::ZERO);
+
+        let exit = wait_for_answer_delivery(
+            &mailbox,
+            &paused,
+            || false,
+            |delivery| {
+                delivery.reply(ctx_traits_io::answer::AnswerDeliveryVerdict::Accepted);
+                AnswerWaitAction::Accepted
+            },
+            || {},
+        );
+
+        assert_eq!(exit, AnswerWaitExit::Accepted);
+        assert_eq!(
+            sender.join().expect("answer listener"),
+            ctx_traits_io::answer::AnswerDeliveryVerdict::Accepted
+        );
+        assert!(paused.get() >= Duration::from_millis(20));
+    }
+
+    #[test]
+    fn stop_exits_and_excludes_parked_time() {
+        let mailbox = ctx_traits_io::run_control::AnswerMailbox::new();
+        let paused = Cell::new(Duration::ZERO);
+
+        let exit = wait_for_answer_delivery(
+            &mailbox,
+            &paused,
+            || true,
+            |_| AnswerWaitAction::Accepted,
+            || {},
+        );
+
+        assert_eq!(exit, AnswerWaitExit::Stopped);
+        assert!(paused.get() > Duration::ZERO);
+    }
 }
 
 fn wait_for_attach_advance(
