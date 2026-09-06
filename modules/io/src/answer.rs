@@ -785,4 +785,187 @@ mod tests {
         let _ = std::fs::remove_file(&ledger_path);
         let _ = std::fs::remove_file(crate::run_control::driver_lock_path(&ledger_path));
     }
+
+    #[test]
+    fn route_answer_applies_a_real_unheld_ask_without_advancing_the_command() {
+        let root = std::env::temp_dir().join(format!(
+            "ctx-answer-route-unheld-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        std::fs::create_dir_all(root.join("generated")).expect("create fixture directory");
+        let trait_path = root.join("generated/index.toml");
+        std::fs::write(
+            &trait_path,
+            "id = \"answer-route-unheld\"\nschema-version = \"0.5\"\nversion = \"0.1.0\"\nname = \"Answer route unheld\"\ndescription = \"Route an answer without driving.\"\n\n[[signal]]\nid = \"ask\"\ndescription = \"Reach the owner question\"\n\n[prompt.setup]\ntext = \"Prepare the owner question.\"\n\n[prompt.ask]\ntext = \"What is the answer?\"\n\n[[agent]]\nid = \"test-agent\"\ndescription = \"Fixture agent.\"\nsummary = \"Fixture agent.\"\n\n[procedure]\ndescription = \"Ask then command\"\n\n[[slot]]\nid = \"setup-output\"\nschema = \"schema:text\"\ndescription = \"Setup output.\"\n\n[[slot]]\nid = \"answer\"\nschema = \"schema:text\"\ndescription = \"Owner answer.\"\n\n[[slot]]\nid = \"command-output\"\nschema = \"schema:text\"\ndescription = \"Command output.\"\n\n[[procedure.sequence]]\nid = \"signal-ask\"\ntitle = \"Signal ask\"\nagent = \"agent:test-agent\"\nprompt = \"prompt:setup\"\noutput = [\"slot:setup-output\"]\non-complete = [\"signal:ask\"]\n\n[[procedure.sequence]]\nid = \"ask\"\ntitle = \"Ask\"\nkind = \"ask\"\nprompt = \"prompt:ask\"\noutput = [\"slot:answer\"]\nwhen = \"signal:ask\"\n\n[[procedure.sequence]]\nid = \"command\"\ntitle = \"Command\"\nkind = \"command\"\ncmd = \"printf complete\"\noutput = [\"slot:command-output\"]\n",
+        )
+        .expect("write fixture trait");
+        std::fs::write(
+            root.join("trait.toml"),
+            "[package]\nid = \"answer-route-unheld\"\nversion = \"0.1.0\"\nname = \"Answer route unheld\"\nstatus = \"ready\"\n",
+        )
+        .expect("write fixture package");
+        let trait_path_text = trait_path.to_string_lossy().into_owned();
+        let loaded = crate::run::load_trait_source(Some(&trait_path_text), None, "test")
+            .expect("load fixture trait");
+        crate::trust::update_named_digest(
+            "answer-route-unheld",
+            &loaded.canonical_digest,
+            crate::trust::TrustState::Verified,
+            Some("answer route test fixture".to_string()),
+        )
+        .expect("trust fixture trait");
+        let session_store = root.join("sessions");
+        let session_store_text = session_store.to_string_lossy().into_owned();
+        let start = crate::run::start(crate::run::StartRequest {
+            trait_file: Some(&trait_path_text),
+            trait_id: None,
+            query: None,
+            trait_args: &[],
+            input_values: Vec::new(),
+            out: None,
+            session_store: Some(&session_store_text),
+            ephemeral: false,
+            resource_evidence: crate::run::ResourceEvidenceMode::Unavailable { reason: "test" },
+            assign_overrides: &[],
+            agent_assignments: None,
+            provider_capability_reports: Vec::new(),
+            provider_warnings: Vec::new(),
+            harness_probes: Vec::new(),
+            caller: CallerProvenance::cli(),
+            state_source: "test",
+            trait_arg_evidence: "test",
+            worktree: None,
+            defer_commands: true,
+            narrate_progress: false,
+            startup_observer: None,
+            strict_loops: false,
+            override_dependencies: false,
+            task_dispatch: false,
+            merge_rung: None,
+        })
+        .expect("start fixture session");
+        let ledger_path = start.session_path.expect("persisted fixture session");
+        crate::run::call(crate::run::CallRequest {
+            trait_file: Some(&trait_path_text),
+            trait_id: None,
+            session: ledger_path.as_str(),
+            session_store: Some(&session_store_text),
+            submission: ctx_traits_core::procedure::session::CallSubmission {
+                session_id: start.session.session_id.clone(),
+                run_id: Some(start.session.run_id.clone()),
+                state_digest: Some(start.session.state_digest.clone()),
+                expected_sequence_item_id: Some("signal-ask".to_string()),
+                expected_run_index: Some(0),
+                expected_source_index: Some(0),
+                expected_position_path: Vec::new(),
+                produced_slots: std::collections::BTreeMap::from([(
+                    "slot:setup-output".to_string(),
+                    serde_json::Value::String("setup".to_string()),
+                )]),
+                signals: std::collections::BTreeMap::from([(
+                    "signal:ask".to_string(),
+                    ctx_traits_core::procedure::session::SignalSubmission {
+                        evidence: Some("fixture setup completed".to_string()),
+                        payload: None,
+                    },
+                )]),
+                warnings: Vec::new(),
+                command_execution: None,
+                caller: Some(CallerProvenance {
+                    surface: "test-driver".to_string(),
+                    caller: "answer route fixture".to_string(),
+                    agent: Some("test-agent".to_string()),
+                    harness: Some("fixture".to_string()),
+                }),
+            },
+            out: None,
+            execution_dir: None,
+            execution_env: &std::collections::BTreeMap::new(),
+            elapsed_seconds: None,
+            tick_observer: None,
+        })
+        .expect("advance fixture to ask");
+        let started = crate::run_session::read_run_session(&ledger_path)
+            .expect("read fixture ask");
+        assert_eq!(
+            started
+                .next_frame
+                .as_ref()
+                .and_then(|frame| frame.item_id.as_deref()),
+            Some("ask")
+        );
+        crate::run_session::record_drive_outcome(
+            ledger_path.as_str(),
+            None,
+            "awaiting-owner",
+            None,
+            None,
+            ctx_traits_core::procedure::session::DriveTerminalEvidence {
+                summons: Some(ctx_traits_core::procedure::session::SummonsRecord {
+                    step_id: "ask".to_string(),
+                    title: "Ask".to_string(),
+                    question: "What is the answer?".to_string(),
+                    answer_slot: "slot:answer".to_string(),
+                    schema_ref: Some("schema:text".to_string()),
+                }),
+                ..Default::default()
+            },
+        )
+        .expect("park fixture ask");
+        let parked = crate::run_session::read_run_session(&ledger_path)
+            .expect("read parked fixture session");
+        let digest = parked.state_digest.to_string();
+        assert!(parked
+            .next_frame
+            .as_ref()
+            .is_some_and(|frame| is_live_summons(&parked, frame)));
+
+        match route_answer(
+            parked.session_id.as_str(),
+            AnswerSubmission {
+                ledger_path: &ledger_path,
+                trait_file: Some(&trait_path_text),
+                session_store: Some(&session_store_text),
+                target: "slot:answer",
+                schema_ref: Some("schema:text"),
+                expected_state_digest: &digest,
+                value: serde_json::Value::String("owner answer".to_string()),
+                caller: CallerProvenance::cli(),
+                existing_input_evidence: "ctx traits answer",
+                advance_command_frames: true,
+            },
+            HeldDeliveryPolicy::Allow,
+        )
+        .expect("route answer") {
+            AnswerRouteOutcome::Submitted { .. } => {}
+            AnswerRouteOutcome::Cancelled => panic!("fixture ask was cancelled"),
+            AnswerRouteOutcome::Stale => panic!("fixture ask was stale"),
+            AnswerRouteOutcome::RejectedCorrection => panic!("fixture answer was rejected"),
+            AnswerRouteOutcome::NotRouted => panic!("fixture answer was not routed"),
+            AnswerRouteOutcome::Delivered(_) => panic!("fixture unexpectedly had a driver"),
+            AnswerRouteOutcome::HeldDeliveryRefused => panic!("fixture held delivery was refused"),
+            AnswerRouteOutcome::HolderUnverifiable => panic!("fixture holder was unverifiable"),
+            AnswerRouteOutcome::Undelivered => panic!("fixture delivery was undelivered"),
+            AnswerRouteOutcome::DriverAppeared => panic!("fixture driver appeared"),
+        }
+
+        let reread = crate::run_session::read_run_session(&ledger_path).expect("reread session");
+        assert!(reread.accepted_slot_values.iter().any(|value| {
+            value.ref_text == "slot:answer"
+                && value.value == serde_json::Value::String("owner answer".to_string())
+        }));
+        assert!(reread
+            .accepted_slot_values
+            .iter()
+            .all(|value| value.ref_text != "slot:command-output"));
+        assert_eq!(
+            reread
+                .next_frame
+                .as_ref()
+                .and_then(|frame| frame.item_id.as_deref()),
+            Some("command")
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
 }
