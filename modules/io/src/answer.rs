@@ -18,6 +18,26 @@ pub struct AnswerSubmission<'a> {
     pub advance_command_frames: bool,
 }
 
+/// The answer data carried over the authenticated driver-control socket.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct AnswerEnvelope {
+    pub target: String,
+    pub schema_ref: Option<String>,
+    pub expected_state_digest: String,
+    pub value: serde_json::Value,
+}
+
+/// The result of delivering an answer to a waiting driver.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub enum AnswerDeliveryVerdict {
+    Accepted,
+    Stale,
+    Cancelled,
+    NotWaiting,
+    RejectedCorrection { detail: String },
+    NotRouted,
+}
+
 /// Result of attempting an answer-submission transaction.
 pub enum AnswerSubmissionOutcome {
     /// The lock was free, the re-check passed, and `run::set` accepted the
@@ -34,6 +54,21 @@ pub enum AnswerSubmissionOutcome {
     /// `run::set` routed the value to a session-level write rather than the
     /// expected call.
     NotRouted,
+}
+
+impl From<&AnswerSubmissionOutcome> for AnswerDeliveryVerdict {
+    fn from(outcome: &AnswerSubmissionOutcome) -> Self {
+        match outcome {
+            AnswerSubmissionOutcome::Submitted { .. } => Self::Accepted,
+            AnswerSubmissionOutcome::Cancelled => Self::Cancelled,
+            AnswerSubmissionOutcome::Stale => Self::Stale,
+            AnswerSubmissionOutcome::LockHeld => Self::NotWaiting,
+            AnswerSubmissionOutcome::RejectedCorrection => Self::RejectedCorrection {
+                detail: "answer rejected; correction required".to_string(),
+            },
+            AnswerSubmissionOutcome::NotRouted => Self::NotRouted,
+        }
+    }
 }
 
 /// The authoritative check for an Ask frame a caller may display or answer.
@@ -70,11 +105,12 @@ pub fn parse_schema_aware_value(
     }
 }
 
-/// Locks, re-reads, validates, then applies one Ask answer.
-pub fn submit_answer(input: AnswerSubmission<'_>) -> crate::Result<AnswerSubmissionOutcome> {
-    let Some(maintenance) = crate::run_control::try_acquire_maintenance(input.ledger_path)? else {
-        return Ok(AnswerSubmissionOutcome::LockHeld);
-    };
+/// Re-reads, validates, then applies one Ask answer without acquiring a lock.
+///
+/// Callers must hold the ledger's maintenance lock for the entire transaction.
+pub fn apply_answer_transaction(
+    input: AnswerSubmission<'_>,
+) -> crate::Result<AnswerSubmissionOutcome> {
     let current = crate::run_session::read_run_session(input.ledger_path)?;
     let current_outcome = current.last_drive_outcome.as_ref().map(|o| &o.outcome);
     let current_state = SessionState::derive(&current.status, current_outcome, false);
@@ -87,7 +123,6 @@ pub fn submit_answer(input: AnswerSubmission<'_>) -> crate::Result<AnswerSubmiss
                 })
         });
     if !valid {
-        drop(maintenance);
         return Ok(if current_state == SessionState::Cancelled {
             AnswerSubmissionOutcome::Cancelled
         } else {
@@ -95,7 +130,7 @@ pub fn submit_answer(input: AnswerSubmission<'_>) -> crate::Result<AnswerSubmiss
         });
     }
 
-    let result = crate::run::set(crate::run::SetRequest {
+    let response = match crate::run::set(crate::run::SetRequest {
         trait_file: input.trait_file,
         trait_id: None,
         session: input.ledger_path.as_str(),
@@ -106,9 +141,7 @@ pub fn submit_answer(input: AnswerSubmission<'_>) -> crate::Result<AnswerSubmiss
         caller: input.caller,
         existing_input_evidence: input.existing_input_evidence,
         advance_command_frames: input.advance_command_frames,
-    });
-    drop(maintenance);
-    let response = match result? {
+    })? {
         crate::run::SetOutcome::Call { response, .. } => response,
         crate::run::SetOutcome::Session { .. } => return Ok(AnswerSubmissionOutcome::NotRouted),
     };
@@ -116,6 +149,14 @@ pub fn submit_answer(input: AnswerSubmission<'_>) -> crate::Result<AnswerSubmiss
         return Ok(AnswerSubmissionOutcome::RejectedCorrection);
     }
     Ok(AnswerSubmissionOutcome::Submitted { response })
+}
+
+/// Locks, re-reads, validates, then applies one Ask answer.
+pub fn submit_answer(input: AnswerSubmission<'_>) -> crate::Result<AnswerSubmissionOutcome> {
+    let Some(_maintenance) = crate::run_control::try_acquire_maintenance(input.ledger_path)? else {
+        return Ok(AnswerSubmissionOutcome::LockHeld);
+    };
+    apply_answer_transaction(input)
 }
 
 #[cfg(test)]
@@ -341,5 +382,48 @@ mod tests {
             Ok(serde_json::Value::String("quoted string".to_string()))
         );
         assert!(parse_schema_aware_value("not json", None).is_err());
+    }
+
+    #[test]
+    fn answer_delivery_verdict_maps_submission_outcomes() {
+        assert_eq!(
+            AnswerDeliveryVerdict::from(&AnswerSubmissionOutcome::Cancelled),
+            AnswerDeliveryVerdict::Cancelled
+        );
+        assert_eq!(
+            AnswerDeliveryVerdict::from(&AnswerSubmissionOutcome::Stale),
+            AnswerDeliveryVerdict::Stale
+        );
+        assert_eq!(
+            AnswerDeliveryVerdict::from(&AnswerSubmissionOutcome::LockHeld),
+            AnswerDeliveryVerdict::NotWaiting
+        );
+        assert_eq!(
+            AnswerDeliveryVerdict::from(&AnswerSubmissionOutcome::RejectedCorrection),
+            AnswerDeliveryVerdict::RejectedCorrection {
+                detail: "answer rejected; correction required".to_string(),
+            }
+        );
+        assert_eq!(
+            AnswerDeliveryVerdict::from(&AnswerSubmissionOutcome::NotRouted),
+            AnswerDeliveryVerdict::NotRouted
+        );
+    }
+
+    #[test]
+    fn answer_wire_types_round_trip_through_json() {
+        let envelope = AnswerEnvelope {
+            target: "slot:ask-owner".to_string(),
+            schema_ref: Some("schema:object".to_string()),
+            expected_state_digest: "sha256:digest".to_string(),
+            value: serde_json::json!({"answer": true}),
+        };
+        assert_eq!(
+            serde_json::from_str::<AnswerEnvelope>(
+                &serde_json::to_string(&envelope).expect("serialize envelope")
+            )
+            .expect("deserialize envelope"),
+            envelope
+        );
     }
 }
