@@ -928,6 +928,10 @@ fn write_line(stream: &mut UnixStream, value: &impl Serialize) -> crate::Result<
             source,
         })?;
     line.push(b'\n');
+    write_raw_line(stream, &line)
+}
+
+fn write_raw_line(stream: &mut UnixStream, line: &[u8]) -> crate::Result<()> {
     if line.len() > MAX_LINE_BYTES {
         return Err(protocol_error("line exceeds limit"));
     }
@@ -2091,6 +2095,8 @@ struct CenterRow {
 
 struct CenterModel {
     rows: HashMap<Utf8PathBuf, CenterRow>,
+    snapshot_lines: HashMap<Utf8PathBuf, Arc<[u8]>>,
+    snapshot_row_serializations: u64,
     db: Connection,
     subscribers: HashMap<u64, Subscriber>,
     // An unverified row is deliberately treated as live for idle purposes:
@@ -2172,7 +2178,7 @@ struct Subscriber {
     outbound: mpsc::SyncSender<Outbound>,
     // The writer pulls the next row only after it has written the preceding
     // message, so a large snapshot cannot occupy one queue allocation.
-    snapshot: Option<VecDeque<CenterPublicRow>>,
+    snapshot: Option<VecDeque<Arc<[u8]>>>,
     // SnapshotEnd has entered the writer queue, but the writer has not yet
     // confirmed it reached the peer. Updates must remain pending until then.
     snapshot_end_queued: bool,
@@ -2190,7 +2196,7 @@ enum Outbound {
         board: Box<BoardWireResult>,
     },
     SnapshotStart(String),
-    SnapshotRow(Box<CenterPublicRow>),
+    SnapshotRow(Arc<[u8]>),
     SnapshotEnd,
 }
 
@@ -2371,6 +2377,8 @@ impl CenterModel {
         drop(statement);
         Ok(Self {
             rows,
+            snapshot_lines: HashMap::new(),
+            snapshot_row_serializations: 0,
             db,
             subscribers: HashMap::new(),
             uncertain: false,
@@ -2379,6 +2387,28 @@ impl CenterModel {
             published_boards: HashMap::new(),
             board_fingerprints: HashMap::new(),
         })
+    }
+
+    fn snapshot_line(&mut self, ledger: &Utf8Path) -> crate::Result<Option<Arc<[u8]>>> {
+        if let Some(line) = self.snapshot_lines.get(ledger) {
+            return Ok(Some(Arc::clone(line)));
+        }
+        let Some(row) = self.rows.get(ledger) else {
+            return Ok(None);
+        };
+        let mut line = serde_json::to_vec(&WireMessage::SnapshotRow {
+            row: Box::new(public_row(row)),
+        })
+        .map_err(|source| crate::parse::Error::JsonSerialize {
+            context: "serialize center snapshot row".to_string(),
+            source,
+        })?;
+        line.push(b'\n');
+        let line: Arc<[u8]> = line.into();
+        self.snapshot_row_serializations += 1;
+        self.snapshot_lines
+            .insert(ledger.to_owned(), Arc::clone(&line));
+        Ok(Some(line))
     }
 
     /// Advance the bounded warming scan by up to `limit` ledgers, starting a
@@ -2726,7 +2756,10 @@ impl CenterModel {
             .iter()
             .map(|(ledger, row)| (ledger.clone(), public_row(row)))
             .collect();
-        self.discover_inner(paths)?;
+        if let Err(error) = self.discover_inner(paths) {
+            self.snapshot_lines.clear();
+            return Err(error);
+        }
         self.broadcast_row_changes(before);
         Ok(())
     }
@@ -2742,7 +2775,11 @@ impl CenterModel {
                 None
             }
         };
-        self.refresh_ledger_inner(paths, ledger, true, repo_paths.as_ref(), None)
+        let result = self.refresh_ledger_inner(paths, ledger, true, repo_paths.as_ref(), None);
+        if result.is_err() {
+            self.snapshot_lines.clear();
+        }
+        result
     }
 
     /// Registration has already authenticated the holder through its lock
@@ -2761,7 +2798,12 @@ impl CenterModel {
                 None
             }
         };
-        self.refresh_ledger_inner(paths, ledger, true, repo_paths.as_ref(), Some(holder))
+        let result =
+            self.refresh_ledger_inner(paths, ledger, true, repo_paths.as_ref(), Some(holder));
+        if result.is_err() {
+            self.snapshot_lines.clear();
+        }
+        result
     }
 
     /// A final outcome refresh changes a retained row. `Ended` is reserved for
@@ -2780,7 +2822,12 @@ impl CenterModel {
                 None
             }
         };
-        self.refresh_ledger_inner(paths, ledger, false, repo_paths.as_ref(), None)?;
+        if let Err(error) =
+            self.refresh_ledger_inner(paths, ledger, false, repo_paths.as_ref(), None)
+        {
+            self.snapshot_lines.clear();
+            return Err(error);
+        }
         let after = self.rows.get(ledger).map(public_row);
         if before != after {
             match (before, after) {
@@ -3100,12 +3147,25 @@ impl CenterModel {
         outbound
             .try_send(Outbound::SnapshotStart(request_id.clone()))
             .map_err(|_| protocol_error("subscriber outbound queue is full"))?;
+        let mut rows: Vec<_> = self
+            .rows
+            .iter()
+            .filter(|(_, row)| repo_key.as_deref().is_none_or(|repo| row.repo_key == repo))
+            .collect();
+        rows.sort_by(|(_, left), (_, right)| center_row_order(left, right));
+        let ledgers: Vec<_> = rows.into_iter().map(|(ledger, _)| ledger.clone()).collect();
+        let mut snapshot = VecDeque::with_capacity(ledgers.len());
+        for ledger in ledgers {
+            if let Some(line) = self.snapshot_line(&ledger)? {
+                snapshot.push_back(line);
+            }
+        }
         self.subscribers.insert(
             id,
             Subscriber {
                 repo_key: repo_key.clone(),
                 outbound,
-                snapshot: Some(public_rows(self, repo_key.as_deref()).into()),
+                snapshot: Some(snapshot),
                 snapshot_end_queued: false,
                 pending: VecDeque::new(),
             },
@@ -3156,7 +3216,7 @@ impl CenterModel {
                 // deadline.
                 loop {
                     let next = match snapshot.pop_front() {
-                        Some(row) => Outbound::SnapshotRow(Box::new(row)),
+                        Some(line) => Outbound::SnapshotRow(line),
                         None => Outbound::SnapshotEnd,
                     };
                     let completed = matches!(&next, Outbound::SnapshotEnd);
@@ -3171,7 +3231,7 @@ impl CenterModel {
                         }
                         Err(mpsc::TrySendError::Full(unsent)) => {
                             if let Outbound::SnapshotRow(row) = unsent {
-                                snapshot.push_front(*row);
+                                snapshot.push_front(row);
                             }
                             break;
                         }
@@ -3247,6 +3307,16 @@ impl CenterModel {
     }
 
     fn broadcast(&mut self, message: CenterDelta) {
+        match &message {
+            CenterDelta::Appeared { row }
+            | CenterDelta::RowChanged { row }
+            | CenterDelta::Ended { row } => {
+                self.snapshot_lines.remove(Utf8Path::new(&row.ledger_path));
+            }
+            CenterDelta::ActivityLine { .. }
+            | CenterDelta::LibraryChanged { .. }
+            | CenterDelta::ConfigChanged { .. } => {}
+        }
         let repo_keys = match &message {
             CenterDelta::Appeared { row }
             | CenterDelta::RowChanged { row }
@@ -4311,9 +4381,7 @@ fn serve_connection_worker_with_board_instants(
                         Outbound::SnapshotStart(id) => {
                             write_line(&mut writer_stream, &WireMessage::SnapshotStart { id })
                         }
-                        Outbound::SnapshotRow(row) => {
-                            write_line(&mut writer_stream, &WireMessage::SnapshotRow { row })
-                        }
+                        Outbound::SnapshotRow(line) => write_raw_line(&mut writer_stream, &line),
                         Outbound::SnapshotEnd => {
                             write_line(&mut writer_stream, &WireMessage::SnapshotEnd)
                         }
@@ -9121,9 +9189,12 @@ mod tests {
             .subscribe(1, "test-subscription".to_string(), None, sender)
             .expect("subscribe");
         assert!(matches!(receiver.recv(), Ok(Outbound::SnapshotStart(_))));
-        let row = public_rows(&model, None).remove(0);
+        let line = model
+            .snapshot_line(&ledger)
+            .expect("serialize snapshot row")
+            .expect("fixture row");
         model.subscribers.get_mut(&1).expect("subscriber").snapshot =
-            Some(VecDeque::from([row.clone(), row]));
+            Some(VecDeque::from([Arc::clone(&line), line]));
 
         let instants = Mutex::new(HashMap::new());
         let board = assemble_board(
