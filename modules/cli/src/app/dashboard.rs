@@ -59,7 +59,8 @@ use ctx_traits_core::task::provider::{
 };
 use ctx_traits_core::task::{Check, CheckOutcome, Closure};
 use ctx_traits_io::answer::{
-    AnswerSubmission, AnswerSubmissionOutcome, parse_schema_aware_value, submit_answer,
+    AnswerDeliveryVerdict, AnswerRouteOutcome, AnswerSubmission, HeldDeliveryPolicy,
+    parse_schema_aware_value, route_answer,
 };
 use ctx_traits_io::task_board_cache::{self, BoardSnapshotRecord};
 use ctx_traits_io::task_files::{self, BoardFingerprint, FilesTaskBoard};
@@ -5388,6 +5389,7 @@ fn apply_session_action(
                 ));
                 return Ok(());
             };
+            let row = row.clone();
             let value = match parse_schema_aware_value(&text, schema_ref.as_deref()) {
                 Ok(value) => value,
                 Err(error) => {
@@ -5404,65 +5406,29 @@ fn apply_session_action(
             let row_session = ctx_traits_io::run_session::read_run_session(&row.ledger_path)?;
             let answer_trait_file =
                 resolve_answer_trait_file(&row_session, row.repo_path.as_deref());
-            let outcome = submit_answer(AnswerSubmission {
-                ledger_path: &row.ledger_path,
-                trait_file: answer_trait_file.as_deref(),
-                session_store: None,
-                target: &target,
-                schema_ref: schema_ref.as_deref(),
-                expected_state_digest: &state_digest,
-                value,
-                caller: ctx_traits_core::procedure::session::CallerProvenance {
-                    surface: "dashboard".to_string(),
-                    caller: "ctx traits dashboard".to_string(),
-                    agent: None,
-                    harness: None,
+            let outcome = route_answer(
+                row_session.session_id.as_str(),
+                AnswerSubmission {
+                    ledger_path: &row.ledger_path,
+                    trait_file: answer_trait_file.as_deref(),
+                    session_store: None,
+                    target: &target,
+                    schema_ref: schema_ref.as_deref(),
+                    expected_state_digest: &state_digest,
+                    value,
+                    caller: ctx_traits_core::procedure::session::CallerProvenance {
+                        surface: "dashboard".to_string(),
+                        caller: "ctx traits dashboard".to_string(),
+                        agent: None,
+                        harness: None,
+                    },
+                    existing_input_evidence: "ctx traits dashboard answer",
+                    advance_command_frames: true,
                 },
-                existing_input_evidence: "ctx traits dashboard answer",
-                advance_command_frames: true,
-            });
+                HeldDeliveryPolicy::Allow,
+            );
             match outcome {
-                Ok(AnswerSubmissionOutcome::LockHeld) => {
-                    state.message = Some(format!(
-                        "answer refused: {display_id}'s driver lock is held"
-                    ));
-                }
-                Ok(AnswerSubmissionOutcome::Cancelled) => {
-                    state.message = Some(format!(
-                        "answer refused: {display_id}'s question was cancelled"
-                    ));
-                }
-                Ok(AnswerSubmissionOutcome::Stale) => {
-                    state.message = Some(format!(
-                        "answer refused: {display_id}'s question changed; reopen it"
-                    ));
-                }
-                Ok(AnswerSubmissionOutcome::RejectedCorrection) => {
-                    state.message =
-                        Some("answer rejected; correct it and reopen the question".to_string());
-                }
-                Ok(AnswerSubmissionOutcome::NotRouted) => {
-                    state.message = Some(
-                        "answer refused: question did not route to its current frame".to_string(),
-                    );
-                }
-                Ok(AnswerSubmissionOutcome::Submitted { response })
-                    if response.session.status
-                        == ctx_traits_core::procedure::session::Status::Completed =>
-                {
-                    state.message = Some(format!("answer accepted; {display_id} completed"));
-                }
-                Ok(AnswerSubmissionOutcome::Submitted { .. }) => {
-                    if let Some(worker) = state.worker.as_ref() {
-                        worker.start_session(
-                            row.session_id.clone(),
-                            display_id.clone(),
-                            row.repo_key.clone(),
-                        );
-                    }
-                    state.message =
-                        Some(format!("answer accepted; resume started for {display_id}"));
-                }
+                Ok(outcome) => apply_answer_route_outcome(state, &row, &display_id, outcome),
                 Err(error) => state.message = Some(format!("answer rejected: {error}")),
             }
             state.reload();
@@ -5616,6 +5582,82 @@ fn apply_session_action(
         }
     }
     Ok(())
+}
+
+fn apply_answer_route_outcome(
+    state: &mut State,
+    row: &SessionRow,
+    display_id: &str,
+    outcome: AnswerRouteOutcome,
+) {
+    match outcome {
+        AnswerRouteOutcome::Delivered(AnswerDeliveryVerdict::Accepted) => {
+            state.message = Some(format!("answer accepted; {display_id}'s driver continues"));
+        }
+        AnswerRouteOutcome::Delivered(AnswerDeliveryVerdict::Stale) | AnswerRouteOutcome::Stale => {
+            state.message = Some(format!(
+                "answer refused: {display_id}'s question changed; reopen it"
+            ));
+        }
+        AnswerRouteOutcome::Delivered(AnswerDeliveryVerdict::Cancelled)
+        | AnswerRouteOutcome::Cancelled => {
+            state.message = Some(format!(
+                "answer refused: {display_id}'s question was cancelled"
+            ));
+        }
+        AnswerRouteOutcome::Delivered(AnswerDeliveryVerdict::NotWaiting) => {
+            state.message = Some(format!(
+                "answer refused: {display_id}'s driver is no longer waiting"
+            ));
+        }
+        AnswerRouteOutcome::Delivered(AnswerDeliveryVerdict::RejectedCorrection { detail }) => {
+            state.message = Some(detail);
+        }
+        AnswerRouteOutcome::RejectedCorrection => {
+            state.message = Some("answer rejected; correct it and reopen the question".to_string());
+        }
+        AnswerRouteOutcome::Delivered(AnswerDeliveryVerdict::NotRouted)
+        | AnswerRouteOutcome::NotRouted => {
+            state.message =
+                Some("answer refused: question did not route to its current frame".to_string());
+        }
+        AnswerRouteOutcome::Submitted { response }
+            if response.session.status
+                == ctx_traits_core::procedure::session::Status::Completed =>
+        {
+            state.message = Some(format!("answer accepted; {display_id} completed"));
+        }
+        AnswerRouteOutcome::Submitted { .. } => {
+            if let Some(worker) = state.worker.as_ref() {
+                worker.start_session(
+                    row.session_id.clone(),
+                    display_id.to_string(),
+                    row.repo_key.clone(),
+                );
+            }
+            state.message = Some(format!("answer accepted; resume started for {display_id}"));
+        }
+        AnswerRouteOutcome::HeldDeliveryRefused => {
+            state.message = Some(format!(
+                "answer refused: {display_id}'s live driver owns advancement"
+            ));
+        }
+        AnswerRouteOutcome::HolderUnverifiable => {
+            state.message = Some(format!(
+                "answer refused: {display_id}'s driver lock holder could not be verified"
+            ));
+        }
+        AnswerRouteOutcome::Undelivered => {
+            state.message = Some(format!(
+                "answer refused: {display_id}'s verified driver could not receive the answer"
+            ));
+        }
+        AnswerRouteOutcome::DriverAppeared => {
+            state.message = Some(format!(
+                "answer refused: {display_id}'s driver appeared while applying the answer; retry"
+            ));
+        }
+    }
 }
 
 /// `m`/`d`: opens the retry confirm modal for the selected MERGES row,
@@ -8936,6 +8978,59 @@ mod tests {
         let worker = worker::Handle::for_tests();
         let actions = worker.test_action_sender();
         (worker, actions)
+    }
+
+    #[test]
+    fn held_answer_delivery_reports_the_existing_driver_without_starting_a_resume() {
+        let mut state = State::new_without_worker();
+        let row = row_with_id("held-answer", SessionClass::Live);
+
+        apply_answer_route_outcome(
+            &mut state,
+            &row,
+            "held-answer",
+            AnswerRouteOutcome::Delivered(AnswerDeliveryVerdict::Accepted),
+        );
+
+        assert_eq!(
+            state.message.as_deref(),
+            Some("answer accepted; held-answer's driver continues")
+        );
+        assert!(
+            state.worker.is_none(),
+            "held delivery must not request a resume"
+        );
+    }
+
+    #[test]
+    fn unheld_answer_submission_requests_a_resume_for_a_noncompleted_session() {
+        use ctx_traits_core::procedure::session::CallResponseKind;
+
+        let mut state = State::new_without_worker();
+        let row = row_with_id("unheld-answer", SessionClass::Resumable);
+        let response = ctx_traits_core::procedure::session::call_response(
+            awaiting_owner_session_fixture(
+                "unheld-answer",
+                "ask-owner",
+                "ask-owner",
+                "What should I do next?",
+            ),
+            CallResponseKind::AcceptedNextFrame,
+        );
+
+        apply_answer_route_outcome(
+            &mut state,
+            &row,
+            "unheld-answer",
+            AnswerRouteOutcome::Submitted {
+                response: Box::new(response),
+            },
+        );
+
+        assert_eq!(
+            state.message.as_deref(),
+            Some("answer accepted; resume started for unheld-answer")
+        );
     }
 
     #[test]
