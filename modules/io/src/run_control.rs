@@ -147,6 +147,12 @@ pub struct AnswerMailbox {
     receiver: Receiver<AnswerDelivery>,
 }
 
+impl Default for AnswerMailbox {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AnswerMailbox {
     pub fn new() -> Self {
         let (sender, receiver) = mpsc::sync_channel(1);
@@ -400,14 +406,13 @@ fn bind_control_listener(
                         } else if byte[0] == b'a'
                             && let Some(on_answer) = on_answer.as_ref()
                             && let Some(envelope) = read_answer_envelope(&mut stream)
+                            && let Ok(body) = serde_json::to_vec(&on_answer(envelope))
                         {
-                            if let Ok(body) = serde_json::to_vec(&on_answer(envelope)) {
-                                let Ok(length) = u32::try_from(body.len()) else {
-                                    return;
-                                };
-                                let _ = stream.write_all(&length.to_be_bytes());
-                                let _ = stream.write_all(&body);
-                            }
+                            let Ok(length) = u32::try_from(body.len()) else {
+                                return;
+                            };
+                            let _ = stream.write_all(&length.to_be_bytes());
+                            let _ = stream.write_all(&body);
                         }
                     }
                 }
