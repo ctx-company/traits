@@ -409,6 +409,183 @@ fn waiting_driver_accepts_a_socket_answer_without_charging_parked_time() {
     );
 }
 
+/// A live holder owns all advancement, so `--no-resume` must refuse without
+/// delivering an answer that would let that holder continue the session.
+#[test]
+fn answer_no_resume_refuses_a_live_waiting_driver_without_mutating_the_ask() {
+    let fixture = start_and_signal("summons-no-resume-held-driver");
+    let ledger = Utf8Path::from_path(&fixture.ledger_path).expect("UTF-8 ledger");
+    let mut driver = DriveChild(spawn_ctx(
+        &[
+            "traits",
+            "internal",
+            "drive",
+            "--file",
+            &fixture.canonical_path,
+            "--session",
+            fixture.ledger_path.to_str().expect("UTF-8 ledger"),
+            "--json",
+        ],
+        &fixture.proj,
+        &fixture.home,
+    ));
+
+    let (parked, holder) = await_live_park(ledger);
+    let before_answer = read_ledger_json(&fixture);
+    let output = run_ctx(
+        &[
+            "traits",
+            "answer",
+            fixture.ledger_path.to_str().expect("UTF-8 ledger"),
+            "--value",
+            "do the thing",
+            "--no-resume",
+        ],
+        &fixture.proj,
+        &fixture.home,
+    );
+    assert!(
+        !output.status.success(),
+        "--no-resume must refuse while a live driver owns advancement"
+    );
+    let (_, stderr) = utf8(&output);
+    assert!(
+        stderr.contains("live driver owns advancement"),
+        "expected the held-driver refusal, got: {stderr}"
+    );
+    assert!(
+        driver
+            .0
+            .try_wait()
+            .expect("poll held driver after refused answer")
+            .is_none(),
+        "the holder must remain parked after a refused answer"
+    );
+    assert_eq!(
+        run_control::probe(ledger).expect("probe held driver after refusal"),
+        DriverProbe::Held(Some(holder.clone())),
+        "the original driver must retain its lock after a refused answer"
+    );
+    assert_eq!(
+        read_ledger_json(&fixture),
+        before_answer,
+        "a held --no-resume refusal must leave the Ask untouched"
+    );
+    assert_eq!(
+        ctx_traits_io::run_session::read_run_session(ledger)
+            .expect("read parked ledger after refusal")
+            .state_digest,
+        parked.state_digest,
+        "a held --no-resume refusal must not advance the parked session"
+    );
+
+    assert!(
+        run_control::request_interrupt(ledger, &holder).expect("interrupt refused-answer driver"),
+        "parked driver did not acknowledge cleanup interrupt"
+    );
+    let status = driver
+        .0
+        .wait()
+        .expect("wait for refused-answer driver after interrupt");
+    assert!(status.success(), "interrupted driver exited with {status}");
+}
+
+/// A normal answer to a live holder travels over that holder's control socket;
+/// the CLI must report its continuation rather than starting another driver.
+#[test]
+fn answer_delivers_to_a_live_waiting_driver_without_starting_a_second_driver() {
+    let fixture = start_and_signal("summons-cli-held-driver-answer");
+    let ledger = Utf8Path::from_path(&fixture.ledger_path).expect("UTF-8 ledger");
+    let mut driver = DriveChild(spawn_ctx(
+        &[
+            "traits",
+            "internal",
+            "drive",
+            "--file",
+            &fixture.canonical_path,
+            "--session",
+            fixture.ledger_path.to_str().expect("UTF-8 ledger"),
+            "--json",
+        ],
+        &fixture.proj,
+        &fixture.home,
+    ));
+
+    let (_, holder) = await_live_park(ledger);
+    let answer_stdout = require_success(
+        "`ctx traits answer <session> --value --json` while a driver waits",
+        &[
+            "traits",
+            "answer",
+            fixture.ledger_path.to_str().expect("UTF-8 ledger"),
+            "--value",
+            "do the thing",
+            "--json",
+        ],
+        &fixture.proj,
+        &fixture.home,
+    );
+    let answer_json = value_json(&answer_stdout);
+    assert_eq!(answer_json["value"]["submitted"], true);
+    assert_eq!(answer_json["value"]["driver-continues"], true);
+    assert!(
+        answer_json["value"]["resumed-status"].is_null(),
+        "the answering CLI must not be a replacement driver: {answer_json}"
+    );
+
+    let exit_deadline = Instant::now() + DRIVER_DEADLINE;
+    let status = loop {
+        match driver.0.try_wait().expect("poll answered held driver") {
+            Some(status) => break status,
+            None if Instant::now() < exit_deadline => std::thread::sleep(DRIVER_POLL),
+            None => panic!(
+                "the original driver did not complete after CLI socket delivery before {DRIVER_DEADLINE:?}"
+            ),
+        }
+    };
+    assert!(status.success(), "answered held driver exited with {status}");
+    assert!(
+        matches!(
+            run_control::probe(ledger).expect("probe completed held-driver ledger"),
+            DriverProbe::Unheld { .. }
+        ),
+        "the original driver must release its lock after completing"
+    );
+
+    let completed = ctx_traits_io::run_session::read_run_session(ledger)
+        .expect("read completed held-driver ledger");
+    assert_eq!(
+        serde_json::to_value(&completed.status).expect("serialize completed status"),
+        "completed"
+    );
+    let completed_json = read_ledger_json(&fixture);
+    let completed_session = session_view(&completed_json);
+    let answer = completed_session["accepted-slot-values"]
+        .as_array()
+        .unwrap_or_else(|| panic!("no accepted-slot-values in {completed_session}"))
+        .iter()
+        .find(|entry| entry["ref-text"] == "slot:ask-owner")
+        .unwrap_or_else(|| {
+            panic!("no accepted ask answer in accepted-slot-values: {completed_session}")
+        });
+    assert_eq!(answer["producer-evidence"], "cli:ctx traits answer");
+    assert!(
+        completed_session["accepted-slot-values"]
+            .as_array()
+            .expect("accepted-slot-values remains an array")
+            .iter()
+            .find(|entry| entry["ref-text"] == "slot:consume-answer")
+            .and_then(|entry| entry["producer-evidence"].as_str())
+            .is_some_and(|evidence| evidence.starts_with("command execution argv=")),
+        "the original driver, not the answering CLI, must advance the trailing command: {completed_session}"
+    );
+    assert_eq!(
+        holder.session_id,
+        completed.session_id.as_str(),
+        "the holder that received the answer must own the completed session"
+    );
+}
+
 /// A stale socket delivery cannot consume or disturb the live summons. The
 /// same waiting driver accepts the matching answer, and its removed control
 /// socket refuses a late duplicate without changing the completed ledger.
@@ -728,6 +905,16 @@ fn ask_step_parks_awaiting_owner_and_ledger_agrees() {
         final_ledger["status"], "completed",
         "the answer must be consumed and the run driven to completion: {final_ledger}"
     );
+    let accepted_answer = final_ledger["accepted-slot-values"]
+        .as_array()
+        .unwrap_or_else(|| panic!("no accepted-slot-values in {final_ledger}"))
+        .iter()
+        .find(|entry| entry["ref-text"] == "slot:ask-owner")
+        .unwrap_or_else(|| panic!("no accepted ask answer in accepted-slot-values: {final_ledger}"));
+    assert_eq!(
+        accepted_answer["producer-evidence"], "cli:ctx traits answer",
+        "the unheld apply must retain the answer surface's provenance: {accepted_answer}"
+    );
     // The trailing command's captured stdout carries the submitted answer,
     // proving it was CONSUMED through the ask's slot (`echo ${ask.result}`)
     // rather than the run merely reaching `completed` for an unrelated
@@ -746,6 +933,16 @@ fn ask_step_parks_awaiting_owner_and_ledger_agrees() {
     assert!(
         consumed.contains("do the thing"),
         "expected the consuming command's captured output to contain the submitted answer, got: {consumed}"
+    );
+    let consume_evidence = final_ledger["accepted-slot-values"]
+        .as_array()
+        .expect("accepted-slot-values remains an array")
+        .iter()
+        .find(|entry| entry["ref-text"] == "slot:consume-answer")
+        .and_then(|entry| entry["producer-evidence"].as_str());
+    assert!(
+        consume_evidence.is_some_and(|evidence| evidence.starts_with("command execution argv=")),
+        "the replacement driver must own trailing command advancement: {final_ledger}"
     );
 
     drop(fixture.ledger_path);
@@ -1024,6 +1221,21 @@ fn answer_no_resume_records_without_driving_the_following_command() {
     assert_ne!(
         mid_session["status"], "completed",
         "the trailing command must not have run before an explicit resume: {mid_session}"
+    );
+    let answer = mid_session["accepted-slot-values"]
+        .as_array()
+        .unwrap_or_else(|| panic!("no accepted-slot-values in {mid_session}"))
+        .iter()
+        .find(|entry| entry["ref-text"] == "slot:ask-owner")
+        .unwrap_or_else(|| panic!("no accepted ask answer in accepted-slot-values: {mid_session}"));
+    assert_eq!(answer["value"], "do the thing");
+    assert_eq!(
+        answer["producer-evidence"], "cli:ctx traits answer",
+        "the accepted answer must retain the submitting human surface: {answer}"
+    );
+    assert_eq!(
+        mid_session["next-frame"]["item-id"], "consume-answer",
+        "the answer apply must leave the session at the frame after the Ask: {mid_session}"
     );
     assert!(
         mid_session
