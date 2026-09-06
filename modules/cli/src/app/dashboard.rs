@@ -2827,6 +2827,13 @@ fn sessions_from_center_rows(rows: &[ctx_traits_io::center::CenterPublicRow]) ->
                 } else {
                     run_view::session_status(&summary.status).to_string()
                 };
+                if row.live
+                    && summary.status == ctx_traits_core::procedure::session::Status::WaitingOnHuman
+                    && summary.next_frame_kind
+                        == Some(ctx_traits_core::procedure::runtime::SequenceFrameKind::Ask)
+                {
+                    state_text = "live · awaiting-owner".to_string();
+                }
                 let mut phase = run_view::session_text::phase_text_from_parts(
                     &summary.status,
                     summary.current_sequence_title.as_deref(),
@@ -9393,6 +9400,64 @@ mod tests {
             "modified_epoch_secs": modified_epoch_secs,
         }))
         .expect("center merge row")
+    }
+
+    fn center_session_row(
+        live: bool,
+        status: &str,
+        next_frame_kind: Option<&str>,
+    ) -> ctx_traits_io::center::CenterPublicRow {
+        let mut value = serde_json::json!({
+            "summary": {
+                "session_id": "session",
+                "run_id": "run",
+                "trait_id": "trait",
+                "status": status,
+                "has_merge_frames": false,
+            },
+            "repo_key": "repo",
+            "repo_path": "/repo",
+            "ledger_path": "/runs/repo/session.json",
+            "live": live,
+            "modified_epoch_secs": 0,
+        });
+        if let Some(next_frame_kind) = next_frame_kind {
+            value["summary"]["next_frame_kind"] = serde_json::json!(next_frame_kind);
+        }
+        serde_json::from_value(value).expect("center session row")
+    }
+
+    #[test]
+    fn held_waiting_ask_row_keeps_liveness_while_presenting_awaiting_owner() {
+        let row =
+            sessions_from_center_rows(&[center_session_row(true, "waiting-on-human", Some("ask"))])
+                .pop()
+                .expect("projected row");
+
+        assert_eq!(row.state_text, "live · awaiting-owner");
+        assert_eq!(row.class, SessionClass::Live);
+        assert_eq!(
+            session_group(row.class, row.status.as_ref(), row.outcome.as_ref()),
+            SessionGroup::Live
+        );
+    }
+
+    #[test]
+    fn held_non_ask_and_unheld_rows_keep_their_existing_state_text() {
+        let held_non_ask =
+            sessions_from_center_rows(&[center_session_row(true, "waiting-on-human", None)])
+                .pop()
+                .expect("held non-Ask row");
+        let unheld_ask = sessions_from_center_rows(&[center_session_row(
+            false,
+            "waiting-on-human",
+            Some("ask"),
+        )])
+        .pop()
+        .expect("unheld Ask row");
+
+        assert_eq!(held_non_ask.state_text, "live");
+        assert_eq!(unheld_ask.state_text, "waiting-on-human");
     }
 
     fn snapshot_with_sessions(sessions: Vec<SessionRow>) -> DashboardSnapshot {
