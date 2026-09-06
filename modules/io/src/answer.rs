@@ -914,13 +914,44 @@ mod tests {
         .expect("park fixture ask");
         let parked = crate::run_session::read_run_session(&ledger_path)
             .expect("read parked fixture session");
-        let digest = parked.state_digest.to_string();
         assert!(
             parked
                 .next_frame
                 .as_ref()
                 .is_some_and(|frame| is_live_summons(&parked, frame))
         );
+
+        let parked_digest = parked.state_digest.to_string();
+        assert!(matches!(
+            route_answer(
+                parked.session_id.as_str(),
+                AnswerSubmission {
+                    ledger_path: &ledger_path,
+                    trait_file: Some(&trait_path_text),
+                    session_store: Some(&session_store_text),
+                    target: "slot:answer",
+                    schema_ref: Some("schema:text"),
+                    expected_state_digest: &parked_digest,
+                    value: serde_json::Value::Null,
+                    caller: CallerProvenance::cli(),
+                    existing_input_evidence: "ctx traits answer",
+                    advance_command_frames: true,
+                },
+                HeldDeliveryPolicy::Allow,
+            )
+            .expect("reject fixture answer"),
+            AnswerRouteOutcome::RejectedCorrection
+        ));
+        let rejected = crate::run_session::read_run_session(&ledger_path)
+            .expect("read rejected fixture session");
+        assert!(
+            rejected
+                .next_frame
+                .as_ref()
+                .is_some_and(|frame| is_live_summons(&rejected, frame)),
+            "a persisted rejected answer must retain its live-summons evidence"
+        );
+        let digest = rejected.state_digest.to_string();
 
         match route_answer(
             parked.session_id.as_str(),

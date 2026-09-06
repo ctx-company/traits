@@ -3529,6 +3529,7 @@ fn reject_without_advancing(
     evidence: Option<&RejectedAttemptEvidence>,
 ) -> crate::Result<Session> {
     let rejection_path = current_rejection_path(&session);
+    let prior_drive_outcome = session.last_drive_outcome.clone();
     stamp_report_rejection_path(&mut report, &rejection_path);
     let mut state = session.ledger;
     rollback_active_parallel_branch(trait_ref, &mut state)?;
@@ -3579,11 +3580,18 @@ fn reject_without_advancing(
     )?;
     // A rejected human answer leaves the same Ask frame answerable; agent
     // output rejections retain the existing correction-routing status.
-    if next
+    let keeps_ask_answerable = next
         .next_frame
         .as_ref()
-        .is_none_or(|frame| frame.kind != SequenceFrameKind::Ask)
-    {
+        .is_some_and(|frame| frame.kind == SequenceFrameKind::Ask);
+    if keeps_ask_answerable {
+        if prior_drive_outcome
+            .as_ref()
+            .is_some_and(|outcome| outcome.outcome.is_settled_pause())
+        {
+            next.last_drive_outcome = prior_drive_outcome;
+        }
+    } else {
         next.status = Status::Rejected;
     }
     Ok(next)
@@ -5507,6 +5515,60 @@ output = ["slot:second-work"]
                         || value.value != serde_json::json!(answer)
                 }),
             "the following worker frame must not receive the prior owner answer"
+        );
+    }
+
+    #[test]
+    fn rejected_owner_answer_preserves_awaiting_owner_evidence() {
+        let trait_ref = fixture_trait();
+        let mut session = submit_current(
+            &trait_ref,
+            start_session(&trait_ref),
+            "slot:verdict",
+            serde_json::json!({"status": "revise"}),
+            Some("reviewer"),
+        )
+        .session;
+        session.last_drive_outcome = Some(DriveOutcome {
+            outcome: DriveOutcomeKind::AwaitingOwner,
+            recorded_at_epoch: 0,
+            provider_credits_pause: None,
+            effective_budget: None,
+            token_usage: None,
+            exit_code: None,
+            rate_limit: None,
+            budget_pause: None,
+            disk_full: None,
+            tokens_by_model: None,
+            summons: None,
+            reclaim: None,
+            interruption_cause: None,
+            interruption_position: None,
+        });
+
+        let rejected = reject_without_advancing(
+            &trait_ref,
+            session,
+            StepValidationReport {
+                sequence_index: 1,
+                accepted_outputs: Vec::new(),
+                rejected_outputs: Vec::new(),
+                missing_required_outputs: vec!["slot:owner-answer".to_string()],
+                unfilled_optional_outputs: Vec::new(),
+                unexpected_outputs: Vec::new(),
+                schema_validation: Vec::new(),
+                signal_validation: Vec::new(),
+                warnings: Vec::new(),
+                next_action: StepNextAction::Rejected,
+            },
+            None,
+        )
+        .expect("rejection rebuilds the ask session");
+
+        assert_eq!(rejected.status, Status::WaitingOnHuman);
+        assert_eq!(
+            rejected.last_drive_outcome.map(|outcome| outcome.outcome),
+            Some(DriveOutcomeKind::AwaitingOwner)
         );
     }
 }

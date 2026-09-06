@@ -617,7 +617,8 @@ pub fn set_merge_intent(
 /// Stamp the terminal outcome of a drive conductor on the session ledger, so
 /// an inspected ledger distinguishes "conductor exited (why, when)" from
 /// "conductor still running". Core transitions rebuild the session without the
-/// marker, so a present marker always postdates the last accepted frame.
+/// marker, except a rejected answer that keeps an Ask frame answerable may
+/// retain its settled-pause marker.
 pub fn record_drive_outcome(
     session: &str,
     store: Option<&str>,
