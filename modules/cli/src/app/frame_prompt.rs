@@ -549,22 +549,7 @@ pub(crate) fn stored_summons_question(
 /// the answer modal, and the CLI verb's inspection and submission TOCTOU
 /// re-check, so none of them can present or accept an answer for a summons
 /// that was never durably recorded as one.
-pub(crate) fn is_live_summons(
-    session: &ctx_traits_core::procedure::session::Session,
-    frame: &ctx_traits_core::procedure::runtime::SequenceFrame,
-) -> bool {
-    if frame.kind != ctx_traits_core::procedure::runtime::SequenceFrameKind::Ask {
-        return false;
-    }
-    let outcome = session.last_drive_outcome.as_ref().map(|o| &o.outcome);
-    let state =
-        ctx_traits_core::procedure::activity::SessionState::derive(&session.status, outcome, false);
-    state == ctx_traits_core::procedure::activity::SessionState::WaitingOnHuman
-        && matches!(
-            outcome,
-            Some(ctx_traits_core::procedure::session::DriveOutcomeKind::AwaitingOwner)
-        )
-}
+pub(crate) use ctx_traits_io::answer::is_live_summons;
 
 fn frame_summary_text(frame: &ctx_traits_core::procedure::runtime::SequenceFrame) -> String {
     frame
@@ -2939,7 +2924,7 @@ mod resolve_input_value_tokens_setting_tests {
     /// never be treated as an answerable summons, even while its raw
     /// `Status` is still `WaitingOnHuman`.
     #[test]
-    fn is_live_summons_requires_an_ask_frame_and_a_durably_recorded_awaiting_owner_outcome() {
+    fn live_summons_requires_an_ask_frame_and_a_durably_recorded_awaiting_owner_outcome() {
         let mut session = test_session(Vec::new());
         let mut ask_frame = test_frame();
         ask_frame.kind = SequenceFrameKind::Ask;

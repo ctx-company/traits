@@ -36,7 +36,6 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line as RLine, Span};
 use ratatui::widgets::Paragraph;
 
-use super::answer::{AnswerSubmission, AnswerSubmissionOutcome, submit_answer};
 use super::frame_prompt::summons_question;
 use super::lifecycle_reporting::dashboard_trait_editable_source;
 use super::merge::{MergeInputs, merge};
@@ -59,6 +58,9 @@ use ctx_traits_core::task::provider::{
     task_state,
 };
 use ctx_traits_core::task::{Check, CheckOutcome, Closure};
+use ctx_traits_io::answer::{
+    AnswerSubmission, AnswerSubmissionOutcome, parse_schema_aware_value, submit_answer,
+};
 use ctx_traits_io::task_board_cache::{self, BoardSnapshotRecord};
 use ctx_traits_io::task_files::{self, BoardFingerprint, FilesTaskBoard};
 
@@ -5386,8 +5388,7 @@ fn apply_session_action(
                 ));
                 return Ok(());
             };
-            let value = match super::answer::parse_schema_aware_value(&text, schema_ref.as_deref())
-            {
+            let value = match parse_schema_aware_value(&text, schema_ref.as_deref()) {
                 Ok(value) => value,
                 Err(error) => {
                     state.message = Some(format!("answer rejected: {error}"));
