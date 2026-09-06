@@ -14,7 +14,7 @@ pub struct AnswerSubmission<'a> {
     pub expected_state_digest: &'a str,
     pub value: serde_json::Value,
     pub caller: CallerProvenance,
-    pub existing_input_evidence: &'static str,
+    pub existing_input_evidence: &'a str,
     pub advance_command_frames: bool,
 }
 
@@ -25,6 +25,10 @@ pub struct AnswerEnvelope {
     pub schema_ref: Option<String>,
     pub expected_state_digest: String,
     pub value: serde_json::Value,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub caller: Option<CallerProvenance>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub existing_input_evidence: Option<String>,
 }
 
 /// The result of delivering an answer to a waiting driver.
@@ -54,6 +58,35 @@ pub enum AnswerSubmissionOutcome {
     /// `run::set` routed the value to a session-level write rather than the
     /// expected call.
     NotRouted,
+}
+
+/// Whether a surface permits handing an answer to an already-running driver.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HeldDeliveryPolicy {
+    Allow,
+    Refuse,
+}
+
+/// Result of routing an answer to either the current driver or the ledger.
+pub enum AnswerRouteOutcome {
+    /// A verified current holder received the answer and returned this verdict.
+    Delivered(AnswerDeliveryVerdict),
+    /// The lock was unheld and the answer transaction accepted the value.
+    Submitted {
+        response: Box<CallResponse>,
+    },
+    Cancelled,
+    Stale,
+    RejectedCorrection,
+    NotRouted,
+    /// The caller refused to let a live driver advance after receiving an answer.
+    HeldDeliveryRefused,
+    /// The lock is held but its metadata cannot identify the requested session.
+    HolderUnverifiable,
+    /// The verified holder disappeared or refused the socket round trip.
+    Undelivered,
+    /// A driver acquired the lock after an unheld probe and before submission.
+    DriverAppeared,
 }
 
 impl From<&AnswerSubmissionOutcome> for AnswerDeliveryVerdict {
@@ -159,10 +192,66 @@ pub fn submit_answer(input: AnswerSubmission<'_>) -> crate::Result<AnswerSubmiss
     apply_answer_transaction(input)
 }
 
+/// Route an answer after its session has already been resolved by a surface.
+///
+/// A held lock is never followed by a ledger write: delivery is only attempted
+/// when its metadata names the same session, and an undelivered request is a
+/// fail-closed result. An unheld route applies just the Ask value; advancing
+/// subsequent frames remains the caller's responsibility.
+pub fn route_answer(
+    session_id: &str,
+    mut input: AnswerSubmission<'_>,
+    held_delivery: HeldDeliveryPolicy,
+) -> crate::Result<AnswerRouteOutcome> {
+    match crate::run_control::probe(input.ledger_path)? {
+        crate::run_control::DriverProbe::Held(Some(holder)) if holder.session_id == session_id => {
+            if held_delivery == HeldDeliveryPolicy::Refuse {
+                return Ok(AnswerRouteOutcome::HeldDeliveryRefused);
+            }
+            let envelope = AnswerEnvelope {
+                target: input.target.to_string(),
+                schema_ref: input.schema_ref.map(str::to_string),
+                expected_state_digest: input.expected_state_digest.to_string(),
+                value: input.value,
+                caller: Some(input.caller),
+                existing_input_evidence: Some(input.existing_input_evidence.to_string()),
+            };
+            return Ok(
+                match crate::run_control::request_answer(input.ledger_path, &holder, &envelope)? {
+                    crate::run_control::AnswerDeliveryResult::Delivered(verdict) => {
+                        AnswerRouteOutcome::Delivered(verdict)
+                    }
+                    crate::run_control::AnswerDeliveryResult::Undelivered => {
+                        AnswerRouteOutcome::Undelivered
+                    }
+                },
+            );
+        }
+        crate::run_control::DriverProbe::Held(_) => {
+            return Ok(AnswerRouteOutcome::HolderUnverifiable);
+        }
+        crate::run_control::DriverProbe::Unheld { .. } => {}
+    }
+
+    input.advance_command_frames = false;
+    Ok(match submit_answer(input)? {
+        AnswerSubmissionOutcome::Submitted { response } => {
+            AnswerRouteOutcome::Submitted { response }
+        }
+        AnswerSubmissionOutcome::Cancelled => AnswerRouteOutcome::Cancelled,
+        AnswerSubmissionOutcome::Stale => AnswerRouteOutcome::Stale,
+        AnswerSubmissionOutcome::LockHeld => AnswerRouteOutcome::DriverAppeared,
+        AnswerSubmissionOutcome::RejectedCorrection => AnswerRouteOutcome::RejectedCorrection,
+        AnswerSubmissionOutcome::NotRouted => AnswerRouteOutcome::NotRouted,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use ctx_traits_core::procedure::session::Status;
+    use std::sync::Arc;
+    use std::time::Duration;
 
     fn awaiting_owner_session_fixture(
         run_id: &str,
@@ -332,6 +421,46 @@ mod tests {
             ))
     }
 
+    fn live_submission<'a>(
+        ledger_path: &'a Utf8Path,
+        expected_state_digest: &'a str,
+    ) -> AnswerSubmission<'a> {
+        AnswerSubmission {
+            ledger_path,
+            trait_file: None,
+            session_store: None,
+            target: "slot:ask-owner",
+            schema_ref: Some("schema:text"),
+            expected_state_digest,
+            value: serde_json::Value::String("do the thing".to_string()),
+            caller: CallerProvenance {
+                surface: "test".to_string(),
+                caller: "answer-test".to_string(),
+                agent: None,
+                harness: None,
+            },
+            existing_input_evidence: "answer-test",
+            advance_command_frames: true,
+        }
+    }
+
+    fn live_facts(
+        ledger_path: &Utf8Path,
+        session_id: &str,
+        run_id: &str,
+    ) -> crate::run_liveness::LiveRunFacts {
+        crate::run_liveness::LiveRunFacts {
+            session_id: session_id.to_string(),
+            run_id: run_id.to_string(),
+            repo_key: "answer-route-test".to_string(),
+            repo_path: String::new(),
+            ledger_path: ledger_path.to_owned(),
+            worktree_path: None,
+            branch: None,
+            log_path: None,
+        }
+    }
+
     #[test]
     fn submit_answer_refuses_a_stale_state_digest_without_writing() {
         let ledger_path = scratch_ledger_path_buf("stale-digest");
@@ -468,6 +597,8 @@ mod tests {
             schema_ref: Some("schema:object".to_string()),
             expected_state_digest: "sha256:digest".to_string(),
             value: serde_json::json!({"answer": true}),
+            caller: Some(CallerProvenance::cli()),
+            existing_input_evidence: Some("answer-wire-test".to_string()),
         };
         assert_eq!(
             serde_json::from_str::<AnswerEnvelope>(
@@ -476,5 +607,182 @@ mod tests {
             .expect("deserialize envelope"),
             envelope
         );
+        assert_eq!(
+            serde_json::from_str::<AnswerEnvelope>(
+                r#"{"target":"slot:ask-owner","schema_ref":null,"expected_state_digest":"sha256:digest","value":null}"#,
+            )
+            .expect("deserialize legacy envelope"),
+            AnswerEnvelope {
+                target: "slot:ask-owner".to_string(),
+                schema_ref: None,
+                expected_state_digest: "sha256:digest".to_string(),
+                value: serde_json::Value::Null,
+                caller: None,
+                existing_input_evidence: None,
+            }
+        );
+    }
+
+    #[test]
+    fn route_answer_delivers_only_to_the_verified_held_session() {
+        let ledger_path = scratch_ledger_path_buf("route-held");
+        let session = awaiting_owner_session_fixture("route-held-run");
+        crate::run_session::write_run_session(&ledger_path, &session)
+            .expect("write fixture session");
+        let digest = session.state_digest.to_string();
+        let received = Arc::new(std::sync::Mutex::new(None));
+        let observed = Arc::clone(&received);
+        let guard = crate::run_control::try_acquire(
+            &live_facts(&ledger_path, session.session_id.as_str(), "route-held-run"),
+            crate::run_control::ControlHandlers::command_only(Arc::new(|_| {})).with_answer(
+                Arc::new(move |envelope| {
+                    *observed.lock().expect("observed envelope") = Some(envelope);
+                    AnswerDeliveryVerdict::Accepted
+                }),
+            ),
+        )
+        .expect("acquire driver lock")
+        .expect("fixture lock is free");
+        std::thread::sleep(Duration::from_millis(100));
+
+        assert!(matches!(
+            route_answer(
+                session.session_id.as_str(),
+                live_submission(&ledger_path, &digest),
+                HeldDeliveryPolicy::Allow,
+            )
+            .expect("route answer"),
+            AnswerRouteOutcome::Delivered(AnswerDeliveryVerdict::Accepted)
+        ));
+        assert!(
+            crate::run_session::read_run_session(&ledger_path)
+                .expect("reread fixture session")
+                .accepted_slot_values
+                .is_empty()
+        );
+        assert_eq!(
+            received
+                .lock()
+                .expect("observed envelope")
+                .as_ref()
+                .and_then(|envelope| envelope.caller.as_ref())
+                .map(|caller| caller.caller.as_str()),
+            Some("answer-test")
+        );
+        drop(guard);
+        let _ = std::fs::remove_file(&ledger_path);
+        let _ = std::fs::remove_file(crate::run_control::driver_lock_path(&ledger_path));
+    }
+
+    #[test]
+    fn route_answer_refuses_held_delivery_without_contacting_or_writing() {
+        let ledger_path = scratch_ledger_path_buf("route-refused");
+        let session = awaiting_owner_session_fixture("route-refused-run");
+        crate::run_session::write_run_session(&ledger_path, &session)
+            .expect("write fixture session");
+        let digest = session.state_digest.to_string();
+        let guard = crate::run_control::try_acquire(
+            &live_facts(
+                &ledger_path,
+                session.session_id.as_str(),
+                "route-refused-run",
+            ),
+            crate::run_control::ControlHandlers::command_only(Arc::new(|_| {})).with_answer(
+                Arc::new(|_| panic!("refused delivery must not reach the holder")),
+            ),
+        )
+        .expect("acquire driver lock")
+        .expect("fixture lock is free");
+
+        assert!(matches!(
+            route_answer(
+                "another-session",
+                live_submission(&ledger_path, &digest),
+                HeldDeliveryPolicy::Allow,
+            )
+            .expect("route mismatched session"),
+            AnswerRouteOutcome::HolderUnverifiable
+        ));
+        assert!(matches!(
+            route_answer(
+                session.session_id.as_str(),
+                live_submission(&ledger_path, &digest),
+                HeldDeliveryPolicy::Refuse,
+            )
+            .expect("route answer"),
+            AnswerRouteOutcome::HeldDeliveryRefused
+        ));
+        assert!(
+            crate::run_session::read_run_session(&ledger_path)
+                .expect("reread fixture session")
+                .accepted_slot_values
+                .is_empty()
+        );
+        drop(guard);
+        let _ = std::fs::remove_file(&ledger_path);
+        let _ = std::fs::remove_file(crate::run_control::driver_lock_path(&ledger_path));
+    }
+
+    #[test]
+    fn route_answer_fails_closed_when_the_verified_holder_cannot_receive() {
+        let ledger_path = scratch_ledger_path_buf("route-undelivered");
+        let session = awaiting_owner_session_fixture("route-undelivered-run");
+        crate::run_session::write_run_session(&ledger_path, &session)
+            .expect("write fixture session");
+        let digest = session.state_digest.to_string();
+        let guard = crate::run_control::try_acquire(
+            &live_facts(
+                &ledger_path,
+                session.session_id.as_str(),
+                "route-undelivered-run",
+            ),
+            crate::run_control::ControlHandlers::command_only(Arc::new(|_| {})),
+        )
+        .expect("acquire driver lock")
+        .expect("fixture lock is free");
+
+        assert!(matches!(
+            route_answer(
+                session.session_id.as_str(),
+                live_submission(&ledger_path, &digest),
+                HeldDeliveryPolicy::Allow,
+            )
+            .expect("route answer"),
+            AnswerRouteOutcome::Undelivered
+        ));
+        assert!(
+            crate::run_session::read_run_session(&ledger_path)
+                .expect("reread fixture session")
+                .accepted_slot_values
+                .is_empty()
+        );
+        drop(guard);
+        let _ = std::fs::remove_file(&ledger_path);
+        let _ = std::fs::remove_file(crate::run_control::driver_lock_path(&ledger_path));
+    }
+
+    #[test]
+    fn route_answer_uses_the_unheld_transaction() {
+        let ledger_path = scratch_ledger_path_buf("route-unheld");
+        let session = awaiting_owner_session_fixture("route-unheld-run");
+        crate::run_session::write_run_session(&ledger_path, &session)
+            .expect("write fixture session");
+        let stale_digest =
+            "sha256:0000000000000000000000000000000000000000000000000000000000000000";
+
+        assert!(matches!(
+            route_answer(
+                session.session_id.as_str(),
+                live_submission(&ledger_path, stale_digest),
+                HeldDeliveryPolicy::Allow,
+            )
+            .expect("route answer"),
+            AnswerRouteOutcome::Stale
+        ));
+        let reread =
+            crate::run_session::read_run_session(&ledger_path).expect("reread fixture session");
+        assert!(reread.accepted_slot_values.is_empty());
+        let _ = std::fs::remove_file(&ledger_path);
+        let _ = std::fs::remove_file(crate::run_control::driver_lock_path(&ledger_path));
     }
 }

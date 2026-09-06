@@ -969,6 +969,8 @@ mod tests {
             schema_ref: Some("schema:text".to_string()),
             expected_state_digest: "sha256:digest".to_string(),
             value: serde_json::Value::String("answer".to_string()),
+            caller: None,
+            existing_input_evidence: None,
         };
         let payload = serde_json::to_vec(&envelope).expect("serialize envelope");
         let mut stream = UnixStream::connect(path.as_std_path()).expect("connect listener");
@@ -1000,6 +1002,8 @@ mod tests {
             schema_ref: None,
             expected_state_digest: "sha256:digest".to_string(),
             value: serde_json::Value::Null,
+            caller: None,
+            existing_input_evidence: None,
         };
         let verdicts = [
             AnswerDeliveryVerdict::Accepted,
@@ -1061,6 +1065,8 @@ mod tests {
             schema_ref: None,
             expected_state_digest: "sha256:digest".to_string(),
             value: serde_json::Value::Bool(true),
+            caller: None,
+            existing_input_evidence: None,
         };
         assert_eq!(
             request_answer(&ledger_path, &holder, &envelope).expect("request while idle"),
@@ -1116,6 +1122,8 @@ mod tests {
                     schema_ref: None,
                     expected_state_digest: "sha256:digest".to_string(),
                     value: serde_json::Value::Null,
+                    caller: None,
+                    existing_input_evidence: None,
                 },
             )
             .expect("request answer"),
@@ -1134,6 +1142,8 @@ mod tests {
                     schema_ref: None,
                     expected_state_digest: "sha256:digest".to_string(),
                     value: serde_json::Value::Null,
+                    caller: None,
+                    existing_input_evidence: None,
                 },
             )
             .expect("request missing answer socket"),

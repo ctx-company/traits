@@ -363,6 +363,8 @@ fn waiting_driver_accepts_a_socket_answer_without_charging_parked_time() {
             schema_ref: summons.schema_ref.clone(),
             expected_state_digest: parked.state_digest.to_string(),
             value: serde_json::Value::String("do the thing".to_string()),
+            caller: None,
+            existing_input_evidence: None,
         },
     )
     .expect("deliver answer to waiting driver");
@@ -440,6 +442,8 @@ fn waiting_driver_refuses_stale_and_late_socket_answers() {
         schema_ref: summons.schema_ref.clone(),
         expected_state_digest: parked.state_digest.to_string(),
         value: serde_json::Value::String("do the thing".to_string()),
+        caller: None,
+        existing_input_evidence: None,
     };
     let mut stale_envelope = correct_envelope.clone();
     stale_envelope.expected_state_digest = "deliberately-stale-digest".to_string();

@@ -2688,8 +2688,20 @@ fn drive_loop(
                             schema_ref: delivery.envelope.schema_ref.as_deref(),
                             expected_state_digest: &delivery.envelope.expected_state_digest,
                             value: delivery.envelope.value.clone(),
-                            caller: ctx_traits_core::procedure::session::CallerProvenance::cli(),
-                            existing_input_evidence: "ctx traits internal drive (control answer)",
+                            // Preserve the submitting surface while keeping Ask input human-owned.
+                            caller: {
+                                let mut caller = delivery.envelope.caller.clone().unwrap_or_else(
+                                    ctx_traits_core::procedure::session::CallerProvenance::cli,
+                                );
+                                caller.agent = None;
+                                caller.harness = None;
+                                caller
+                            },
+                            existing_input_evidence: delivery
+                                .envelope
+                                .existing_input_evidence
+                                .as_deref()
+                                .unwrap_or("ctx traits internal drive (control answer)"),
                             advance_command_frames: true,
                         };
                         let answer_outcome =
@@ -5329,6 +5341,8 @@ mod answer_wait_tests {
                 schema_ref: None,
                 expected_state_digest: "digest".to_string(),
                 value: serde_json::Value::Null,
+                caller: None,
+                existing_input_evidence: None,
             })
         });
         let paused = Cell::new(Duration::ZERO);
