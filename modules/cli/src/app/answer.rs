@@ -12,14 +12,16 @@ use ctx_traits_core::procedure::session::{CallerProvenance, Status};
 use ctx_traits_core::response::{CommandOutput, Envelope};
 use serde::Serialize;
 
-use ctx_traits_io::answer::{AnswerSubmission, AnswerSubmissionOutcome, submit_answer};
+use ctx_traits_io::answer::{
+    route_answer, AnswerDeliveryVerdict, AnswerRouteOutcome, AnswerSubmission, HeldDeliveryPolicy,
+};
 
 use crate::app::command_handlers::print_json_report;
 use crate::app::dashboard::resolve_answer_trait_file;
 use crate::app::frame_prompt::summons_question;
 use crate::app::lifecycle_reporting::current_utf8_dir;
 use crate::app::presentation::{
-    OutputMode, Panel, PanelRow, PanelStatus, RowTone, emit_human, wire_name,
+    emit_human, wire_name, OutputMode, Panel, PanelRow, PanelStatus, RowTone,
 };
 use crate::app::story;
 
@@ -77,6 +79,10 @@ pub(crate) struct AnswerReport {
     /// Present only when `submitted` and a resume was attempted.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) resumed_status: Option<String>,
+    /// A pre-existing driver accepted the answer or won the replacement-drive
+    /// race, so this invocation must not start another one.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub(crate) driver_continues: bool,
 }
 
 pub(crate) fn handle_answer(
@@ -161,6 +167,7 @@ pub(crate) fn handle_answer(
                     schema: schema_ref,
                     submitted: false,
                     resumed_status: None,
+                    driver_continues: false,
                 },
             )?));
         }
@@ -178,60 +185,131 @@ pub(crate) fn handle_answer(
         serde_json::Value::String(raw_value.expect("value branch set raw_value"))
     };
 
-    let outcome = submit_answer(AnswerSubmission {
-        ledger_path: &ledger_path,
-        trait_file: trait_file.as_deref(),
-        session_store: inputs.session_store,
-        target: &target,
-        schema_ref: schema_ref.as_deref(),
-        expected_state_digest: session.state_digest.as_str(),
-        value,
-        caller: CallerProvenance {
-            surface: "cli".to_string(),
-            caller: "ctx traits answer".to_string(),
-            agent: None,
-            harness: None,
+    let outcome = route_answer(
+        session.session_id.as_str(),
+        AnswerSubmission {
+            ledger_path: &ledger_path,
+            trait_file: trait_file.as_deref(),
+            session_store: inputs.session_store,
+            target: &target,
+            schema_ref: schema_ref.as_deref(),
+            expected_state_digest: session.state_digest.as_str(),
+            value,
+            caller: CallerProvenance {
+                surface: "cli".to_string(),
+                caller: "ctx traits answer".to_string(),
+                agent: None,
+                harness: None,
+            },
+            existing_input_evidence: "ctx traits answer",
+            advance_command_frames: false,
         },
-        existing_input_evidence: "ctx traits answer",
-        advance_command_frames: !inputs.no_resume,
-    })?;
-    let response = match outcome {
-        AnswerSubmissionOutcome::Submitted { response } => response,
-        AnswerSubmissionOutcome::LockHeld => {
-            return Err(crate::Error::Command {
-                message: format!("answer refused: {display_id}'s driver lock is held"),
-            });
-        }
-        AnswerSubmissionOutcome::Cancelled => {
-            return Err(crate::Error::Command {
-                message: format!("answer refused: {display_id}'s question was cancelled"),
-            });
-        }
-        AnswerSubmissionOutcome::Stale => {
+        if inputs.no_resume {
+            HeldDeliveryPolicy::Refuse
+        } else {
+            HeldDeliveryPolicy::Allow
+        },
+    )?;
+    let (response, driver_continues) = match outcome {
+        AnswerRouteOutcome::Delivered(AnswerDeliveryVerdict::Accepted) => (None, true),
+        AnswerRouteOutcome::Delivered(AnswerDeliveryVerdict::Stale) => {
             return Err(crate::Error::Command {
                 message: format!(
                     "answer refused: {display_id}'s question changed; reopen it with `ctx traits answer {display_id}`"
                 ),
             });
         }
-        AnswerSubmissionOutcome::NotRouted => {
+        AnswerRouteOutcome::Delivered(AnswerDeliveryVerdict::Cancelled) => {
+            return Err(crate::Error::Command {
+                message: format!("answer refused: {display_id}'s question was cancelled"),
+            });
+        }
+        AnswerRouteOutcome::Delivered(AnswerDeliveryVerdict::NotWaiting) => {
+            return Err(crate::Error::Command {
+                message: format!("answer refused: {display_id}'s driver is no longer waiting"),
+            });
+        }
+        AnswerRouteOutcome::Delivered(AnswerDeliveryVerdict::RejectedCorrection { detail }) => {
+            return Err(crate::Error::Command { message: detail });
+        }
+        AnswerRouteOutcome::Delivered(AnswerDeliveryVerdict::NotRouted) => {
             return Err(crate::Error::Command {
                 message: format!(
                     "answer refused: {display_id}'s question did not route to its current frame"
                 ),
             });
         }
-        AnswerSubmissionOutcome::RejectedCorrection => {
+        AnswerRouteOutcome::Submitted { response } => (Some(response), false),
+        AnswerRouteOutcome::Cancelled => {
+            return Err(crate::Error::Command {
+                message: format!("answer refused: {display_id}'s question was cancelled"),
+            });
+        }
+        AnswerRouteOutcome::Stale => {
+            return Err(crate::Error::Command {
+                message: format!(
+                    "answer refused: {display_id}'s question changed; reopen it with `ctx traits answer {display_id}`"
+                ),
+            });
+        }
+        AnswerRouteOutcome::RejectedCorrection => {
             return Err(crate::Error::Command {
                 message: "answer rejected; correct it and re-run `ctx traits answer`".to_string(),
             });
         }
+        AnswerRouteOutcome::NotRouted => {
+            return Err(crate::Error::Command {
+                message: format!(
+                    "answer refused: {display_id}'s question did not route to its current frame"
+                ),
+            });
+        }
+        AnswerRouteOutcome::HeldDeliveryRefused => {
+            return Err(crate::Error::Command {
+                message: format!(
+                    "answer refused: {display_id}'s live driver owns advancement; rerun without --no-resume"
+                ),
+            });
+        }
+        AnswerRouteOutcome::HolderUnverifiable => {
+            return Err(crate::Error::Command {
+                message: format!(
+                    "answer refused: {display_id}'s driver lock holder could not be verified"
+                ),
+            });
+        }
+        AnswerRouteOutcome::Undelivered => {
+            return Err(crate::Error::Command {
+                message: format!(
+                    "answer refused: {display_id}'s verified driver could not receive the answer"
+                ),
+            });
+        }
+        AnswerRouteOutcome::DriverAppeared => {
+            return Err(crate::Error::Command {
+                message: format!(
+                    "answer refused: {display_id}'s driver appeared while applying the answer; retry"
+                ),
+            });
+        }
     };
 
-    let resumed_status = if inputs.no_resume {
+    let resumed_status = if driver_continues || inputs.no_resume {
         None
-    } else if response.session.status == Status::Completed {
-        Some(wire_name(&response.session.status))
+    } else if response
+        .as_ref()
+        .expect("unheld route has response")
+        .session
+        .status
+        == Status::Completed
+    {
+        Some(wire_name(
+            &response
+                .as_ref()
+                .expect("unheld route has response")
+                .session
+                .status,
+        ))
     } else {
         let panel_handoff = crate::app::drive::PanelHandoff::new();
         let report = crate::app::drive::drive(crate::app::drive::DriveInputs {
@@ -256,8 +334,13 @@ pub(crate) fn handle_answer(
             startup: None,
             frame_observer: None,
         })?;
-        Some(report.status)
+        if report.status == "driver-lock-busy" {
+            None
+        } else {
+            Some(report.status)
+        }
     };
+    let driver_continues = driver_continues || (!inputs.no_resume && resumed_status.is_none());
 
     print_and_return(
         inputs.json,
@@ -271,6 +354,7 @@ pub(crate) fn handle_answer(
             schema: schema_ref,
             submitted: true,
             resumed_status,
+            driver_continues,
         },
     )
     .map(CommandOutput::new)
@@ -315,9 +399,16 @@ fn answer_report_panel(report: &AnswerReport) -> Panel {
             RowTone::Default,
         ));
     panel = if report.submitted {
-        match &report.resumed_status {
-            Some(status) => panel.row(PanelRow::toned("resumed to", status, RowTone::Default)),
-            None => panel.row(PanelRow::toned("resumed", "no", RowTone::Default)),
+        match (&report.resumed_status, report.driver_continues) {
+            (_, true) => panel.row(PanelRow::toned(
+                "resumed",
+                "driver continues",
+                RowTone::Default,
+            )),
+            (Some(status), false) => {
+                panel.row(PanelRow::toned("resumed to", status, RowTone::Default))
+            }
+            (None, false) => panel.row(PanelRow::toned("resumed", "no", RowTone::Default)),
         }
     } else {
         panel.row(PanelRow::toned(
@@ -377,6 +468,7 @@ mod tests {
             schema: None,
             submitted: false,
             resumed_status: None,
+            driver_continues: false,
         }
     }
 
