@@ -1551,6 +1551,7 @@ fn print_story_at_termination(
 pub(crate) enum CompletionDisposition {
     NoIntent,
     DriveNotCompleted,
+    ParkedAwaitingOwner,
     Merged,
     Parked,
     Failed,
@@ -1676,7 +1677,7 @@ fn human_terminal_failure(
         drive.credits_pause.is_some(),
         drive.budget_pause.is_some(),
         drive.disk_full_park.is_some(),
-        drive.status == "awaiting-owner",
+        drive.summons_park.is_some(),
         drive.status == "interrupted",
         session.status.clone(),
         drive.final_session_status.clone(),
@@ -1684,13 +1685,11 @@ fn human_terminal_failure(
 }
 
 /// `disk_full_parked` is carried only when the durable disk-full evidence was
-/// retained in the report. `summons_parked` is keyed on the drive's own reported outcome string
-/// (`report.status`, downgraded to `"harness-failed"` if the drive-outcome
-/// marker failed to persist, mirroring `credits_paused`/`budget_paused`) —
-/// never the session's raw `Status::WaitingOnHuman`, which reflects frame
-/// readiness independent of whether the terminal outcome was actually
-/// recorded. A summons whose evidence failed to write must still report a
-/// failure (P0253.4).
+/// retained in the report. `summons_parked` is keyed on durable summons
+/// evidence retained in `DriveReport`, never the session's raw
+/// `Status::WaitingOnHuman`, which reflects frame readiness independent of
+/// whether the terminal outcome was actually recorded. A summons whose
+/// evidence failed to write must still report a failure (P0253.4).
 /// `interrupted` is the drive's own graceful-stop outcome (a cooperative
 /// `SIGINT` or control-socket stop drained to a frame boundary, 0281.3
 /// including a `SIGINT` that ended a waiting gate child): the session is
@@ -1860,6 +1859,19 @@ pub(crate) fn disposition_for_report_status(status: &str) -> CompletionDispositi
     }
 }
 
+fn disposition_for_incomplete_drive(
+    outcome: Option<&ctx_traits_core::procedure::session::DriveOutcomeKind>,
+) -> CompletionDisposition {
+    if matches!(
+        outcome,
+        Some(ctx_traits_core::procedure::session::DriveOutcomeKind::AwaitingOwner)
+    ) {
+        CompletionDisposition::ParkedAwaitingOwner
+    } else {
+        CompletionDisposition::DriveNotCompleted
+    }
+}
+
 impl CompletionDisposition {
     /// The single status→exit mapping both `run --merge` and standalone
     /// `ctx traits merge` use, so the two verbs cannot diverge on what a
@@ -1868,7 +1880,8 @@ impl CompletionDisposition {
     pub(crate) fn exit_code(self) -> Option<u8> {
         match self {
             CompletionDisposition::NoIntent | CompletionDisposition::Merged => None,
-            CompletionDisposition::DriveNotCompleted => {
+            CompletionDisposition::DriveNotCompleted
+            | CompletionDisposition::ParkedAwaitingOwner => {
                 Some(crate::app::error::EXIT_RUN_NOT_COMPLETED)
             }
             CompletionDisposition::Parked => Some(crate::app::error::EXIT_MERGE_PARKED),
@@ -1990,6 +2003,10 @@ impl CompletionOutcome {
                 message: format!(
                     "run {run_id:?} did not reach a completed drive; merge was not attempted"
                 ),
+                exit_code: crate::app::error::EXIT_RUN_NOT_COMPLETED,
+            }),
+            CompletionDisposition::ParkedAwaitingOwner => Err(crate::Error::AlreadyReported {
+                message: format!("run {run_id:?} parked awaiting owner; merge was not attempted"),
                 exit_code: crate::app::error::EXIT_RUN_NOT_COMPLETED,
             }),
             CompletionDisposition::Parked => Err(crate::Error::AlreadyReported {
@@ -2212,6 +2229,18 @@ pub(crate) fn complete_after_drive(
             disposition: CompletionDisposition::NoIntent,
         });
     };
+    // `final_session` is a rebuilt inspection snapshot: core's rebuild
+    // (`refresh_run_session`) always clears `last_drive_outcome` (unlike
+    // `provenance`, which threads through unchanged). Re-read the raw
+    // persisted ledger for both incomplete-drive classification and the
+    // completed-drive merge gates below.
+    let raw_session = ctx_traits_io::run_session::read_run_session(session_path)?;
+    let not_completed_disposition = disposition_for_incomplete_drive(
+        raw_session
+            .last_drive_outcome
+            .as_ref()
+            .map(|outcome| &outcome.outcome),
+    );
     if final_session.status != ctx_traits_core::procedure::session::Status::Completed {
         return Ok(CompletionOutcome {
             session: final_session,
@@ -2219,17 +2248,9 @@ pub(crate) fn complete_after_drive(
             drive_outcome: None,
             failure_reason: None,
             human_terminal_failure: false,
-            disposition: CompletionDisposition::DriveNotCompleted,
+            disposition: not_completed_disposition,
         });
     }
-    // `final_session` is a rebuilt inspection snapshot: core's rebuild
-    // (`refresh_run_session`) always clears `last_drive_outcome` (unlike
-    // `provenance`, which threads through unchanged). Re-read the raw
-    // persisted ledger to check the actual recorded drive outcome instead of
-    // trusting a field that is never present here, and to check whether a
-    // prior merge attempt already reached a terminal outcome (one-shot
-    // landing: an automatic merge is never retried after it parks).
-    let raw_session = ctx_traits_io::run_session::read_run_session(session_path)?;
     let raw_completed = raw_session
         .last_drive_outcome
         .as_ref()
@@ -2241,7 +2262,7 @@ pub(crate) fn complete_after_drive(
             drive_outcome: None,
             failure_reason: None,
             human_terminal_failure: false,
-            disposition: CompletionDisposition::DriveNotCompleted,
+            disposition: not_completed_disposition,
         });
     }
     let prior_terminal_status = raw_session
@@ -2332,6 +2353,10 @@ fn print_final_output(
     }
     if let Some(park) = &drive.disk_full_park {
         crate::app::drive::print_disk_full_park(park, &drive.session)?;
+        return Ok(());
+    }
+    if let Some(summons) = summons_park_for_final_output(drive) {
+        crate::app::drive::print_summons_park(summons, &drive.session)?;
         return Ok(());
     }
 
@@ -2437,6 +2462,12 @@ fn print_final_output(
         }
         Ok(())
     })
+}
+
+fn summons_park_for_final_output(
+    drive: &crate::app::drive::DriveReport,
+) -> Option<&ctx_traits_core::procedure::session::SummonsRecord> {
+    drive.summons_park.as_ref()
 }
 
 fn landing_detail(landing: &ctx_traits_core::procedure::session::LandingState) -> String {
@@ -2977,13 +3008,13 @@ pub(crate) fn run_envelope<T: serde::Serialize>(
 #[cfg(test)]
 mod completion_disposition_tests {
     use super::{
-        CompletionDisposition, PropagatedDriveError, disposition_for_merge_status,
-        disposition_for_report_status, failure_reason_from_values, human_terminal_failure_values,
-        merged_fact_from_terminal, propagated_drive_error_abort,
+        CompletionDisposition, PropagatedDriveError, disposition_for_incomplete_drive,
+        disposition_for_merge_status, disposition_for_report_status, failure_reason_from_values,
+        human_terminal_failure_values, merged_fact_from_terminal, propagated_drive_error_abort,
         resolve_propagated_drive_error_choice, restart_out, restart_worktree, run_completed_status,
         run_header_from_title, short_failure_line,
     };
-    use ctx_traits_core::procedure::session::{MergeStatus, Status};
+    use ctx_traits_core::procedure::session::{DriveOutcomeKind, MergeStatus, Status};
 
     #[test]
     fn run_header_uses_title_or_trait_only_fallback() {
@@ -3339,6 +3370,18 @@ mod completion_disposition_tests {
         assert_eq!(
             disposition_for_report_status("parked"),
             CompletionDisposition::Parked
+        );
+    }
+
+    #[test]
+    fn awaiting_owner_incomplete_drive_has_a_typed_park_disposition() {
+        assert_eq!(
+            disposition_for_incomplete_drive(Some(&DriveOutcomeKind::AwaitingOwner)),
+            CompletionDisposition::ParkedAwaitingOwner
+        );
+        assert_eq!(
+            disposition_for_incomplete_drive(Some(&DriveOutcomeKind::Failed)),
+            CompletionDisposition::DriveNotCompleted
         );
     }
 

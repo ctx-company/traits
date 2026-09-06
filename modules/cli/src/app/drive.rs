@@ -321,6 +321,9 @@ pub struct DriveReport {
     /// Present only when dispatch parked below `[worktree.retention] disk-floor-mb`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub disk_full_park: Option<ctx_traits_core::procedure::session::DiskFullPark>,
+    /// Present only when a live Ask was durably parked for an owner answer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub summons_park: Option<ctx_traits_core::procedure::session::SummonsRecord>,
     /// See [`ctx_traits_core::procedure::session::DriveOutcome::tokens_by_model`]
     /// (0130). `None` when this drive observed no tokens at all.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1251,6 +1254,7 @@ pub fn drive(input: DriveInputs<'_>) -> crate::Result<DriveReport> {
             rate_limit: None,
             budget_pause: None,
             disk_full_park: None,
+            summons_park: None,
             tokens_by_model: None,
         };
         push_capability(
@@ -1561,6 +1565,7 @@ pub fn drive(input: DriveInputs<'_>) -> crate::Result<DriveReport> {
             report.credits_pause = None;
             report.budget_pause = None;
             report.disk_full_park = None;
+            report.summons_park = None;
         }
         report
             .warnings
@@ -1886,6 +1891,7 @@ fn busy_report(input: &DriveInputs<'_>) -> DriveReport {
         rate_limit: None,
         budget_pause: None,
         disk_full_park: None,
+        summons_park: None,
         tokens_by_model: None,
     }
 }
@@ -2257,6 +2263,7 @@ fn drive_loop(
         rate_limit: None,
         budget_pause: None,
         disk_full_park: None,
+        summons_park: None,
         tokens_by_model: None,
     };
     report
@@ -2669,6 +2676,7 @@ fn drive_loop(
                     report.status = "awaiting-owner".to_string();
                     return Ok(report);
                 }
+                report.summons_park = Some(summons.clone());
                 // The durable park precedes this live refresh so a reader can
                 // always resolve the row's summons from the ledger.
                 notifier.frame_done();
@@ -4702,6 +4710,9 @@ pub fn print_report(
     if let Some(park) = &report.disk_full_park {
         print_disk_full_park(park, &report.session)?;
     }
+    if let Some(summons) = &report.summons_park {
+        print_summons_park(summons, &report.session)?;
+    }
     if let Some(merge) = &report.merge {
         crate::app::merge::print_report(merge, crate::app::presentation::HumanOutputMode::Compact)?;
     }
@@ -4884,6 +4895,82 @@ pub fn print_disk_full_park(
         crate::app::presentation::HumanOutputMode::Compact,
         || Ok(()),
     )
+}
+
+/// Rendering counterpart to the durable Ask park. The report carries this
+/// only after the awaiting-owner outcome and summons were persisted.
+pub fn print_summons_park(
+    summons: &ctx_traits_core::procedure::session::SummonsRecord,
+    session: &str,
+) -> crate::Result<()> {
+    let panel = summons_park_panel(summons, session);
+    emit_human(
+        false,
+        &panel,
+        crate::app::presentation::HumanOutputMode::Compact,
+        || Ok(()),
+    )
+}
+
+fn summons_park_panel(
+    summons: &ctx_traits_core::procedure::session::SummonsRecord,
+    session: &str,
+) -> Panel {
+    Panel::new(
+        "ctx",
+        "drive",
+        PanelStatus::Blocked("parked (awaiting owner)".to_string()),
+    )
+    .row(PanelRow::toned(
+        "question",
+        summons.question.clone(),
+        RowTone::Default,
+    ))
+    .row(PanelRow::toned(
+        "answer-slot",
+        format!(
+            "{} (schema: {})",
+            summons.answer_slot,
+            summons.schema_ref.as_deref().unwrap_or("schema:any")
+        ),
+        RowTone::Default,
+    ))
+    .next(PanelRow::toned(
+        "answer",
+        format!("ctx traits answer --session {session}"),
+        RowTone::Default,
+    ))
+}
+
+#[cfg(test)]
+mod summons_park_tests {
+    use super::summons_park_panel;
+
+    #[test]
+    fn summons_park_panel_names_question_slot_and_answer_command() {
+        let summons = ctx_traits_core::procedure::session::SummonsRecord {
+            step_id: "ask-owner".to_string(),
+            title: "Release approval".to_string(),
+            question: "Should this release proceed?".to_string(),
+            answer_slot: "approval".to_string(),
+            schema_ref: Some("schema:boolean".to_string()),
+        };
+
+        let panel = summons_park_panel(&summons, "session-1");
+        let text = panel
+            .styled_lines()
+            .into_iter()
+            .flat_map(|line| {
+                line.segments()
+                    .map(|(text, _)| text.to_string())
+                    .collect::<Vec<_>>()
+            })
+            .collect::<String>();
+        assert!(text.contains("parked (awaiting owner)"));
+        assert!(text.contains("Should this release proceed?"));
+        assert!(text.contains("approval (schema: schema:boolean)"));
+        assert!(text.contains("ctx traits answer --session session-1"));
+    }
 }
 
 /// 0130: this model's estimated cost — billing-aware (shared by
