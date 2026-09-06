@@ -286,9 +286,8 @@ struct SessionRow {
     /// The ledger's last-recorded drive outcome kind, or `None` for an
     /// unreadable ledger or a session that has never driven. Threaded into
     /// [`SessionState::derive`][ctx_traits_core::procedure::activity::SessionState::derive]
-    /// alongside `status` so a cancelled parked ask (status still
-    /// `WaitingOnHuman`, outcome `Interrupted`) classifies `Cancelled` rather
-    /// than staying grouped as an open ask.
+    /// alongside `status` so a parked ask (status still `WaitingOnHuman`,
+    /// outcome `Interrupted`) remains grouped as an open ask.
     outcome: Option<ctx_traits_core::procedure::session::DriveOutcomeKind>,
     next_frame_kind: Option<ctx_traits_core::procedure::runtime::SequenceFrameKind>,
     interrupted: bool,
@@ -12387,11 +12386,8 @@ argv = ["git", "commit", "-m", "fixture"]
         );
     }
 
-    // Blocker 2 (P509): a parked ask cancelled via STOP still carries
-    // `status == WaitingOnHuman` (record_interrupted_outcome never rewrites
-    // status) — only the outcome distinguishes it from a still-open ask.
     #[test]
-    fn classify_session_maps_cancelled_parked_ask_to_terminal() {
+    fn classify_session_maps_interrupted_parked_ask_to_resumable() {
         use ctx_traits_core::procedure::session::{DriveOutcomeKind, Status};
         assert_eq!(
             classify_session(
@@ -12399,7 +12395,7 @@ argv = ["git", "commit", "-m", "fixture"]
                 &Status::WaitingOnHuman,
                 Some(&DriveOutcomeKind::Interrupted)
             ),
-            SessionClass::Terminal
+            SessionClass::Resumable
         );
         assert_eq!(
             classify_session(false, &Status::WaitingOnHuman, None),
@@ -12663,11 +12659,11 @@ argv = ["git", "commit", "-m", "fixture"]
                 SessionGroup::Failed,
             ),
             (
-                "interrupted",
+                "interrupted parked ask",
                 SessionClass::Terminal,
                 Some(Status::WaitingOnHuman),
                 Some(DriveOutcomeKind::Interrupted),
-                SessionGroup::Failed,
+                SessionGroup::Pending,
             ),
             (
                 "killed",

@@ -29,10 +29,12 @@ impl SessionState {
         if live {
             return Self::Running;
         }
-        if matches!(
-            outcome,
-            Some(DriveOutcomeKind::Interrupted) | Some(DriveOutcomeKind::Killed)
-        ) {
+        if !matches!(status, Status::WaitingOnHuman)
+            && matches!(
+                outcome,
+                Some(DriveOutcomeKind::Interrupted) | Some(DriveOutcomeKind::Killed)
+            )
+        {
             return Self::Cancelled;
         }
         match status {
@@ -318,11 +320,37 @@ mod tests {
     }
 
     #[test]
-    fn killed_outcome_derives_cancelled_like_interrupted() {
-        assert_eq!(
-            SessionState::derive(&Status::Failed, Some(&DriveOutcomeKind::Killed), false),
-            SessionState::Cancelled
-        );
+    fn unheld_interrupted_or_killed_waiting_on_human_remains_resumable() {
+        for outcome in [DriveOutcomeKind::Interrupted, DriveOutcomeKind::Killed] {
+            let state = SessionState::derive(&Status::WaitingOnHuman, Some(&outcome), false);
+            assert_eq!(state, SessionState::WaitingOnHuman);
+            assert!(state.is_resumable());
+        }
+    }
+
+    #[test]
+    fn unheld_interrupted_or_killed_other_statuses_remain_cancelled() {
+        for status in [
+            Status::AwaitingInput,
+            Status::AwaitingAgentOutput,
+            Status::Rejected,
+            Status::BlockedCommandPermissionRequired,
+            Status::Blocked,
+            Status::BlockedAgentUnassigned,
+            Status::Completed,
+            Status::Failed,
+        ] {
+            for outcome in [DriveOutcomeKind::Interrupted, DriveOutcomeKind::Killed] {
+                assert_eq!(
+                    SessionState::derive(&status, Some(&outcome), false),
+                    SessionState::Cancelled
+                );
+                assert_eq!(
+                    SessionState::derive(&status, Some(&outcome), true),
+                    SessionState::Running
+                );
+            }
+        }
     }
 
     #[test]
