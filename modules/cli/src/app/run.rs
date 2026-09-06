@@ -772,6 +772,11 @@ pub(crate) enum TaskQueueOutcome {
     DiskFull {
         park: Option<ctx_traits_core::procedure::session::DiskFullPark>,
     },
+    /// The drive reached a live Ask and durably parked awaiting its owner.
+    /// This halts the queue, but is not a failure.
+    AwaitingOwner {
+        summons: Option<ctx_traits_core::procedure::session::SummonsRecord>,
+    },
     /// The run reached a terminal state that is not `Completed` — rejected on
     /// a step, blocked, still waiting on an agent or a human, cancelled. The
     /// session status and the recorded drive outcome are carried verbatim so
@@ -787,11 +792,14 @@ pub(crate) enum TaskQueueOutcome {
 
 impl TaskQueueOutcome {
     /// Row tone is driven by the failure classification, not queue control
-    /// flow: a disk-full park halts but remains a warning.
+    /// flow: resource and owner parks halt but remain warnings.
     fn tone(&self) -> crate::app::presentation::RowTone {
         if self.fails() {
             crate::app::presentation::RowTone::Fail
-        } else if matches!(self, TaskQueueOutcome::DiskFull { .. }) {
+        } else if matches!(
+            self,
+            TaskQueueOutcome::DiskFull { .. } | TaskQueueOutcome::AwaitingOwner { .. }
+        ) {
             crate::app::presentation::RowTone::Warn
         } else {
             crate::app::presentation::RowTone::Pass
@@ -810,10 +818,14 @@ impl TaskQueueOutcome {
         )
     }
 
-    /// A failed run, parked/failed merge, or disk-full park halts the queue
+    /// A failed run, parked/failed merge, or non-failure park halts the queue
     /// by default; `--continue-on-failure` is the only override.
     fn halts(&self) -> bool {
-        self.fails() || matches!(self, TaskQueueOutcome::DiskFull { .. })
+        self.fails()
+            || matches!(
+                self,
+                TaskQueueOutcome::DiskFull { .. } | TaskQueueOutcome::AwaitingOwner { .. }
+            )
     }
 
     fn label(&self) -> String {
@@ -829,6 +841,12 @@ impl TaskQueueOutcome {
                 park.floor_mb, park.available_bytes, park.probed_path
             ),
             TaskQueueOutcome::DiskFull { park: None } => "parked: disk-full".to_string(),
+            TaskQueueOutcome::AwaitingOwner {
+                summons: Some(summons),
+            } => format!("parked: awaiting owner — {}", summons.question),
+            TaskQueueOutcome::AwaitingOwner { summons: None } => {
+                "parked: awaiting owner".to_string()
+            }
             TaskQueueOutcome::NotCompleted { status, outcome } => match outcome {
                 Some(outcome) => format!("not completed: {status} ({outcome})"),
                 None => format!("not completed: {status}"),
@@ -864,6 +882,13 @@ fn queue_not_completed(
     {
         return Some(TaskQueueOutcome::DiskFull {
             park: recorded.disk_full.clone(),
+        });
+    }
+    if let Some(recorded) = drive_outcome
+        && recorded.outcome == ctx_traits_core::procedure::session::DriveOutcomeKind::AwaitingOwner
+    {
+        return Some(TaskQueueOutcome::AwaitingOwner {
+            summons: recorded.summons.clone(),
         });
     }
     Some(TaskQueueOutcome::NotCompleted {
@@ -1010,17 +1035,30 @@ pub(crate) fn handle_task_queue_run(
     let any_failed = outcomes.iter().any(|(_, outcome)| outcome.fails());
     if any_halting {
         return Err(crate::Error::AlreadyReported {
-            message: if any_failed && halted {
-                "task queue halted".to_string()
-            } else if any_failed {
-                "task queue completed with failures".to_string()
-            } else {
-                "task queue parked: disk-full".to_string()
-            },
+            message: task_queue_halt_message(&outcomes, halted, any_failed),
             exit_code: crate::app::error::EXIT_RUN_FAILED,
         });
     }
     Ok(CommandOutput::new(()))
+}
+
+fn task_queue_halt_message(
+    outcomes: &[(String, TaskQueueOutcome)],
+    halted: bool,
+    any_failed: bool,
+) -> String {
+    if any_failed && halted {
+        "task queue halted".to_string()
+    } else if any_failed {
+        "task queue completed with failures".to_string()
+    } else if outcomes
+        .iter()
+        .any(|(_, outcome)| matches!(outcome, TaskQueueOutcome::AwaitingOwner { .. }))
+    {
+        "task queue parked: awaiting owner".to_string()
+    } else {
+        "task queue parked: disk-full".to_string()
+    }
 }
 
 /// The queue's own control flow (0195 Watch item: halt on a failed run or
@@ -1201,6 +1239,23 @@ mod task_queue_drive_tests {
             queue_not_completed(&session, Some(&budget)),
             Some(TaskQueueOutcome::NotCompleted { outcome: None, .. })
         ));
+
+        let awaiting_owner: DriveOutcome = serde_json::from_value(serde_json::json!({
+            "outcome": "awaiting-owner",
+            "recorded-at-epoch": 1000,
+            "summons": {
+                "step-id": "approval",
+                "title": "Approve release",
+                "question": "Should this release proceed?",
+                "answer-slot": "approved",
+            },
+        }))
+        .expect("awaiting-owner record deserializes");
+        assert!(matches!(
+            queue_not_completed(&session, Some(&awaiting_owner)),
+            Some(TaskQueueOutcome::AwaitingOwner { summons: Some(summons) })
+                if summons.question == "Should this release proceed?"
+        ));
     }
 
     #[test]
@@ -1247,6 +1302,27 @@ mod task_queue_drive_tests {
         assert_eq!(
             disk_full.label(),
             "parked: disk-full (floor 512 MiB, 42 bytes free at /worktree)"
+        );
+
+        let awaiting_owner = TaskQueueOutcome::AwaitingOwner {
+            summons: Some(ctx_traits_core::procedure::session::SummonsRecord {
+                step_id: "approval".to_string(),
+                title: "Approve release".to_string(),
+                question: "Should this release proceed?".to_string(),
+                answer_slot: "approved".to_string(),
+                schema_ref: None,
+            }),
+        };
+        assert!(awaiting_owner.halts());
+        assert!(!awaiting_owner.fails());
+        assert_eq!(awaiting_owner.tone(), RowTone::Warn);
+        assert_eq!(
+            awaiting_owner.label(),
+            "parked: awaiting owner — Should this release proceed?"
+        );
+        assert_eq!(
+            TaskQueueOutcome::AwaitingOwner { summons: None }.label(),
+            "parked: awaiting owner"
         );
     }
 
@@ -1332,6 +1408,52 @@ mod task_queue_drive_tests {
             drive_task_queue(&queue, true, |_| TaskQueueOutcome::DiskFull { park: None });
         assert!(!halted);
         assert_eq!(outcomes.len(), 2);
+    }
+
+    #[test]
+    fn awaiting_owner_halts_as_a_park_and_continue_runs_past_it() {
+        let queue = vec!["0001".to_string(), "0002".to_string()];
+        let (outcomes, halted) = drive_task_queue(&queue, false, |_| {
+            TaskQueueOutcome::AwaitingOwner { summons: None }
+        });
+        assert!(halted);
+        assert_eq!(outcomes.len(), 1);
+        assert_eq!(
+            task_queue_halt_message(&outcomes, halted, false),
+            "task queue parked: awaiting owner"
+        );
+
+        let (outcomes, halted) = drive_task_queue(&queue, true, |_| {
+            TaskQueueOutcome::AwaitingOwner { summons: None }
+        });
+        assert!(!halted);
+        assert_eq!(outcomes.len(), 2);
+        assert_eq!(
+            task_queue_halt_message(&outcomes, halted, false),
+            "task queue parked: awaiting owner"
+        );
+    }
+
+    #[test]
+    fn halt_message_keeps_existing_failure_and_disk_full_wording() {
+        let disk_full = vec![(
+            "0001".to_string(),
+            TaskQueueOutcome::DiskFull { park: None },
+        )];
+        assert_eq!(
+            task_queue_halt_message(&disk_full, true, false),
+            "task queue parked: disk-full"
+        );
+
+        let merge_park = vec![("0001".to_string(), TaskQueueOutcome::Parked)];
+        assert_eq!(
+            task_queue_halt_message(&merge_park, true, true),
+            "task queue halted"
+        );
+        assert_eq!(
+            task_queue_halt_message(&merge_park, false, true),
+            "task queue completed with failures"
+        );
     }
 }
 
