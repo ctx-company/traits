@@ -3,7 +3,7 @@ key = "0279.4"
 title = "A cancelled ask stays resumable and re-askable"
 status = "ready"
 raised = "2026-09-03"
-content = '''
+content = """
 This plan separates GOALS from APPROACH. The GOALS section is binding: each
 names an observable outcome, what decides it, and what it excludes. The
 APPROACH section is the architect's suggested route — files, symbols, edit
@@ -80,8 +80,8 @@ dependency on the other children.
    Decided by: existing dashboard/run-view tests staying green.
 
 5. **Existing suites stay green.** Decided by the declared checks.
-'''
-scope = '''
+"""
+scope = """
 ## Decisions
 
 - Fix the semantics at `SessionState::derive`, not per-surface: dashboard,
@@ -115,8 +115,8 @@ scope = '''
    the `proof_summons` integration run is the gate that exercises the
    re-fire proof. Isolate the build cache (`CARGO_TARGET_DIR=target`) in
    a run worktree before trusting a gate failure.
-'''
-validation = '''
+"""
+validation = """
 ## Watch
 
 - The inversion is surgical: non-Ask interrupted/killed sessions must keep
@@ -135,7 +135,7 @@ validation = '''
   resume-and-re-fire proof.
 - Core, center, dashboard suites, `proof_summons`, and `just test` are
   green.
-'''
+"""
 
 [relations]
 parent = "0279"
