@@ -8954,6 +8954,64 @@ mod tests {
     }
 
     #[test]
+    fn snapshot_serialization_is_reused_until_a_row_changes() {
+        fn drain_snapshot(
+            model: &mut CenterModel,
+            id: u64,
+            receiver: &mpsc::Receiver<Outbound>,
+            rows: usize,
+        ) {
+            assert!(matches!(receiver.recv(), Ok(Outbound::SnapshotStart(_))));
+            for _ in 0..rows {
+                model.advance_snapshot(id);
+                assert!(matches!(receiver.recv(), Ok(Outbound::SnapshotRow(_))));
+            }
+            model.advance_snapshot(id);
+            assert!(matches!(receiver.recv(), Ok(Outbound::SnapshotEnd)));
+            model.advance_snapshot(id);
+        }
+
+        let root = scratch("snapshot-serialization-cache");
+        let paths = paths(root.clone());
+        let first = write_fixture_ledger(&root, "first", "completed");
+        let _second = write_fixture_ledger(&root, "second", "completed");
+        let _third = write_fixture_ledger(&root, "third", "completed");
+        let mut model = CenterModel::open(&paths).expect("open index");
+        model.discover(&paths).expect("construct model");
+        let rows = model.rows.len();
+
+        let (first_sender, first_receiver) = mpsc::sync_channel(8);
+        model
+            .subscribe(1, "first".to_string(), None, first_sender)
+            .expect("first subscribe");
+        drain_snapshot(&mut model, 1, &first_receiver, rows);
+        assert_eq!(model.snapshot_row_serializations, rows as u64);
+
+        let (second_sender, second_receiver) = mpsc::sync_channel(8);
+        model
+            .subscribe(2, "second".to_string(), None, second_sender)
+            .expect("second subscribe");
+        drain_snapshot(&mut model, 2, &second_receiver, rows);
+        assert_eq!(model.snapshot_row_serializations, rows as u64);
+
+        model.broadcast_activity(first.as_str(), test_activity());
+        let (third_sender, third_receiver) = mpsc::sync_channel(8);
+        model
+            .subscribe(3, "third".to_string(), None, third_sender)
+            .expect("third subscribe");
+        drain_snapshot(&mut model, 3, &third_receiver, rows);
+        assert_eq!(model.snapshot_row_serializations, rows as u64 + 1);
+
+        let (fourth_sender, fourth_receiver) = mpsc::sync_channel(8);
+        model
+            .subscribe(4, "fourth".to_string(), None, fourth_sender)
+            .expect("fourth subscribe");
+        drain_snapshot(&mut model, 4, &fourth_receiver, rows);
+        assert_eq!(model.snapshot_row_serializations, rows as u64 + 1);
+        let _ = std::fs::remove_dir_all(root.as_std_path());
+    }
+
+    #[test]
     fn delta_racing_snapshot_follows_snapshot_end() {
         let root = scratch("snapshot-race");
         let paths = paths(root.clone());
