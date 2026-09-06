@@ -3,7 +3,7 @@ key = "0279.3"
 title = "Every surface delivers answers to the one driver"
 status = "ready"
 raised = "2026-09-03"
-content = '''
+content = """
 This plan separates GOALS from APPROACH. The GOALS section is binding: each
 names an observable outcome, what decides it, and what it excludes. The
 APPROACH section is the architect's suggested route — files, symbols, edit
@@ -112,8 +112,8 @@ the incident regression.
    Decided by: a detached-process proof in the declared suites.
 
 5. **Existing suites stay green.** Decided by the declared checks.
-'''
-scope = '''
+"""
+scope = """
 ## Decisions
 
 - No center wire protocol change in this family. Every in-scope surface
@@ -152,8 +152,8 @@ scope = '''
    proof_center`, `... --test proof_summons`, then `just test`. Isolate the
    build cache (`CARGO_TARGET_DIR=target`) in a run worktree before
    trusting a gate failure.
-'''
-validation = '''
+"""
+validation = """
 ## Watch
 
 - Dependency direction holds: io never calls cli; surfaces stay thin.
@@ -172,11 +172,14 @@ validation = '''
   frame, that ordinary continuation is performed by a replacement driver,
   and that `--no-resume` leaves the accepted session unadvanced.
 - `proof_center`, `proof_summons`, and `just test` are green.
-'''
+"""
 
 [relations]
+depends-on = [
+    "0279.1",
+    "0279.2",
+]
 parent = "0279"
-depends-on = ["0279.1", "0279.2"]
 
 [[checks]]
 name = "center process proofs are green including the incident regression"
