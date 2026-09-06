@@ -519,6 +519,76 @@ fn waiting_driver_refuses_stale_and_late_socket_answers() {
     );
 }
 
+/// Interrupting a parked driver releases its flock but retains the durable
+/// summons, so a later drive can reacquire the session and park again.
+#[test]
+fn interrupting_a_waiting_driver_releases_the_lock_and_keeps_the_park() {
+    let fixture = start_and_signal("summons-interrupt-waiting-driver");
+    let ledger = Utf8Path::from_path(&fixture.ledger_path).expect("UTF-8 ledger");
+    let mut driver = DriveChild(spawn_ctx(
+        &[
+            "traits",
+            "internal",
+            "drive",
+            "--file",
+            &fixture.canonical_path,
+            "--session",
+            fixture.ledger_path.to_str().expect("UTF-8 ledger"),
+            "--json",
+        ],
+        &fixture.proj,
+        &fixture.home,
+    ));
+
+    let (parked, holder) = await_live_park(ledger);
+    assert!(
+        run_control::request_interrupt(ledger, &holder).expect("interrupt waiting driver"),
+        "the waiting driver must acknowledge its control interrupt"
+    );
+    let exit_deadline = Instant::now() + DRIVER_DEADLINE;
+    let status = loop {
+        match driver.0.try_wait().expect("poll interrupted driver") {
+            Some(status) => break status,
+            None if Instant::now() < exit_deadline => std::thread::sleep(DRIVER_POLL),
+            None => panic!("driver did not exit after interrupt before {DRIVER_DEADLINE:?}"),
+        }
+    };
+    assert!(status.success(), "interrupted driver exited with {status}");
+    assert!(
+        matches!(
+            run_control::probe(ledger).expect("probe interrupted driver"),
+            DriverProbe::Unheld { .. }
+        ),
+        "an interrupted driver must release its flock"
+    );
+
+    let after_interrupt = ctx_traits_io::run_session::read_run_session(ledger)
+        .expect("re-read ledger after interrupt");
+    assert_eq!(after_interrupt.state_digest, parked.state_digest);
+    assert_eq!(
+        after_interrupt
+            .last_drive_outcome
+            .as_ref()
+            .map(|outcome| outcome.outcome.as_str()),
+        Some("awaiting-owner"),
+        "interrupting a parked driver must retain its durable park"
+    );
+    assert!(
+        after_interrupt
+            .next_frame
+            .as_ref()
+            .is_some_and(|frame| ctx_traits_io::answer::is_live_summons(&after_interrupt, frame)),
+        "the interrupted park must remain resumable as a live summons"
+    );
+
+    let resumed_stdout = drive_to_park(&fixture);
+    assert_eq!(
+        value_json(&resumed_stdout)["value"]["status"],
+        "awaiting-owner",
+        "a later driver must resume the retained park rather than reject the session"
+    );
+}
+
 /// A signal-gated `ask` step parks the run `awaiting-owner` (not a run
 /// failure), with the outcome durable in the ledger re-read off disk.
 #[test]
