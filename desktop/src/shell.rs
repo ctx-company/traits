@@ -2444,12 +2444,8 @@ mod tests {
         let heading = vcx
             .debug_bounds("tasks-section-heading-value-Ready 2")
             .unwrap();
-        let first = vcx
-            .debug_bounds("tasks-section-Ready-row-ready-a")
-            .unwrap();
-        let second = vcx
-            .debug_bounds("tasks-section-Ready-row-ready-b")
-            .unwrap();
+        let first = vcx.debug_bounds("tasks-section-Ready-row-ready-a").unwrap();
+        let second = vcx.debug_bounds("tasks-section-Ready-row-ready-b").unwrap();
         assert_eq!(
             first.origin.y - (heading.origin.y + heading.size.height),
             tokens::LIST_SECTION_GAP + px(0.5),

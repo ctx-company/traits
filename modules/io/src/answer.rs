@@ -886,8 +886,7 @@ mod tests {
             tick_observer: None,
         })
         .expect("advance fixture to ask");
-        let started = crate::run_session::read_run_session(&ledger_path)
-            .expect("read fixture ask");
+        let started = crate::run_session::read_run_session(&ledger_path).expect("read fixture ask");
         assert_eq!(
             started
                 .next_frame
@@ -916,10 +915,12 @@ mod tests {
         let parked = crate::run_session::read_run_session(&ledger_path)
             .expect("read parked fixture session");
         let digest = parked.state_digest.to_string();
-        assert!(parked
-            .next_frame
-            .as_ref()
-            .is_some_and(|frame| is_live_summons(&parked, frame)));
+        assert!(
+            parked
+                .next_frame
+                .as_ref()
+                .is_some_and(|frame| is_live_summons(&parked, frame))
+        );
 
         match route_answer(
             parked.session_id.as_str(),
@@ -937,7 +938,8 @@ mod tests {
             },
             HeldDeliveryPolicy::Allow,
         )
-        .expect("route answer") {
+        .expect("route answer")
+        {
             AnswerRouteOutcome::Submitted { .. } => {}
             AnswerRouteOutcome::Cancelled => panic!("fixture ask was cancelled"),
             AnswerRouteOutcome::Stale => panic!("fixture ask was stale"),
@@ -955,10 +957,12 @@ mod tests {
             value.ref_text == "slot:answer"
                 && value.value == serde_json::Value::String("owner answer".to_string())
         }));
-        assert!(reread
-            .accepted_slot_values
-            .iter()
-            .all(|value| value.ref_text != "slot:command-output"));
+        assert!(
+            reread
+                .accepted_slot_values
+                .iter()
+                .all(|value| value.ref_text != "slot:command-output")
+        );
         assert_eq!(
             reread
                 .next_frame

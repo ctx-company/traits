@@ -543,7 +543,10 @@ fn answer_delivers_to_a_live_waiting_driver_without_starting_a_second_driver() {
             ),
         }
     };
-    assert!(status.success(), "answered held driver exited with {status}");
+    assert!(
+        status.success(),
+        "answered held driver exited with {status}"
+    );
     assert!(
         matches!(
             run_control::probe(ledger).expect("probe completed held-driver ledger"),
@@ -910,7 +913,9 @@ fn ask_step_parks_awaiting_owner_and_ledger_agrees() {
         .unwrap_or_else(|| panic!("no accepted-slot-values in {final_ledger}"))
         .iter()
         .find(|entry| entry["ref-text"] == "slot:ask-owner")
-        .unwrap_or_else(|| panic!("no accepted ask answer in accepted-slot-values: {final_ledger}"));
+        .unwrap_or_else(|| {
+            panic!("no accepted ask answer in accepted-slot-values: {final_ledger}")
+        });
     assert_eq!(
         accepted_answer["producer-evidence"], "cli:ctx traits answer",
         "the unheld apply must retain the answer surface's provenance: {accepted_answer}"

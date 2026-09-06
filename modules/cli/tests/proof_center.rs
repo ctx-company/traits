@@ -1069,13 +1069,11 @@ fn await_session_id(ledger: &std::path::Path) -> String {
     }
 }
 
-fn await_live_ask_park(
-    ledger: &camino::Utf8Path,
-) -> ctx_traits_io::run_control::DriverHolder {
+fn await_live_ask_park(ledger: &camino::Utf8Path) -> ctx_traits_io::run_control::DriverHolder {
     let deadline = Instant::now() + PROCESS_DEADLINE;
     loop {
-        let session = ctx_traits_io::run_session::read_run_session(ledger)
-            .expect("read parked Ask ledger");
+        let session =
+            ctx_traits_io::run_session::read_run_session(ledger).expect("read parked Ask ledger");
         if session.last_drive_outcome.as_ref().is_some_and(|outcome| {
             outcome.outcome.as_str() == "awaiting-owner" && outcome.summons.is_some()
         }) && let Ok(ctx_traits_io::run_control::DriverProbe::Held(Some(holder))) =
@@ -3191,7 +3189,8 @@ fn answer_process_delivers_to_the_center_registered_parked_driver_without_a_seco
     let mut sentinel =
         spawn_sentinel_with_home(&root, &socket, &root.join("index.sqlite3"), "5000", &home);
     drop(await_socket(&socket));
-    let subscription = ctx_traits_io::center::subscribe(None).expect("subscribe before driver start");
+    let subscription =
+        ctx_traits_io::center::subscribe(None).expect("subscribe before driver start");
     assert!(matches!(
         subscription.recv_timeout(PROCESS_DEADLINE),
         Ok(ctx_traits_io::center::CenterEvent::SnapshotStart)
@@ -3235,13 +3234,14 @@ fn answer_process_delivers_to_the_center_registered_parked_driver_without_a_seco
     await_outcome(&ledger, "completed");
     let completed = ctx_traits_io::run_session::read_run_session(&ledger_utf8)
         .expect("read completed ledger directly");
-    assert_eq!(serde_json::to_value(&completed.status).unwrap(), "completed");
+    assert_eq!(
+        serde_json::to_value(&completed.status).unwrap(),
+        "completed"
+    );
     let completed_json: serde_json::Value =
         serde_json::from_slice(&std::fs::read(&ledger).expect("read completed ledger JSON"))
             .expect("decode completed ledger JSON");
-    let session_json = completed_json
-        .get("session")
-        .unwrap_or(&completed_json);
+    let session_json = completed_json.get("session").unwrap_or(&completed_json);
     let values = session_json["accepted-slot-values"]
         .as_array()
         .unwrap_or_else(|| panic!("no accepted values in {session_json}"));
@@ -3280,13 +3280,19 @@ fn answer_process_delivers_to_the_center_registered_parked_driver_without_a_seco
             Err(error) => panic!("read center delta: {error}"),
         }
     }
-    assert_eq!(registrations, 1, "the session registered exactly one driver");
+    assert_eq!(
+        registrations, 1,
+        "the session registered exactly one driver"
+    );
     let logs = std::fs::read_dir(root.join("start-logs"))
         .expect("read center driver logs")
         .filter_map(Result::ok)
         .filter(|entry| entry.path().to_string_lossy().ends_with(".stdout.log"))
         .count();
-    assert_eq!(logs, 1, "answer delivery must not spawn a second internal drive");
+    assert_eq!(
+        logs, 1,
+        "answer delivery must not spawn a second internal drive"
+    );
 
     drop(subscription);
     sentinel.0.kill().expect("stop private sentinel");

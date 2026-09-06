@@ -95,6 +95,8 @@ impl SnapshotAssembler {
 }
 
 /// What one bounded wait on the subscription yielded.
+// Boxing the transient event would allocate on every pump iteration.
+#[allow(clippy::large_enum_variant)]
 enum PumpEvent {
     Event(CenterEvent),
     /// No event arrived within `CONSUMER_POLL_INTERVAL`; the subscription is

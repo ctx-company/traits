@@ -1719,6 +1719,7 @@ mod now_and_verdict_tests {
             branch: "ctx/run/wt-ab12ef".to_string(),
             seed_snapshots: Vec::new(),
             path: None,
+            base: None,
         });
         baseline_value.session.provenance.merge_frames = vec![MergeFrame {
             stage: MergeStage::Landing,
