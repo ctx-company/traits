@@ -103,7 +103,7 @@ description = "The current stage's proof command, copied from the brief for the 
 [[slot]]
 id = "proof-result"
 schema = "schema:text"
-description = "What the stage's proof command said about the worker's latest claim: the literal 'pass', or 'fail' with the exit code and the tail of the command's output. Written only when the worker claimed the stage complete; a claim that failed proof comes back to the worker with this text and costs no review."
+description = "What the stage's proof command said about the worker's latest claim: the literal 'pass', or 'fail' with the exit code and the tail of the command's output. Written only when the worker claimed the stage complete; a claim that failed proof comes back to the worker with this text and costs no review. A 'pass' is the mechanical floor — necessary, not sufficient: it means the command's checks held, never that the stage goal is met. Whether the stage is actually done is the reviewer's call, and a rejected claim comes back through the brief's last-claim even when this reads 'pass'."
 
 [[slot]]
 id = "review-verdict-1"
@@ -227,7 +227,7 @@ fields = ["done-when"]
 
 [[schema]]
 id = "brief"
-description = "The worker's next unit of work: the first open stage with its goal, proof and commit flag verbatim from the plan, and the front step with its frozen done-when. The only part of the verdict the worker sees, so it must stand on its own."
+description = "The worker's next unit of work: the first open stage with its goal, proof and commit flag verbatim from the plan, the front step with its frozen done-when, and the reviewer's response to the worker's last claim. The only part of the verdict the worker sees, so it must stand on its own — including whether the last completion claim was rejected and why."
 
 [schema.fields.commit]
 schema = "schema:boolean"
@@ -247,6 +247,10 @@ description = "That stage's goal, verbatim from the plan. The worker's objective
 [schema.fields.guidance]
 schema = "schema:text"
 description = "The front step's guidance, verbatim, when present."
+
+[schema.fields.last-claim]
+schema = "schema:text"
+description = "The reviewer's response to the worker's LAST completion claim, written FOR THE WORKER — the one thing the worker cannot otherwise learn, because it never sees the verdict, only this brief. When the worker's last report claimed the stage complete and this verdict does not accept it, begin with 'REJECTED:' and name the specific gap that keeps the stage open: the failing done-when clause, the file and symbol still on the wrong path, what the diff is missing. When the stage's proof passed but does not establish the goal, say so plainly — a passing proof is the mechanical floor, not proof of done, so it is not sufficient here. Empty or absent when the last report made no completion claim, or there was none. Without this the worker sees only its own 'complete' report and a passing proof — both telling it the stage is done — and re-claims the same state unchanged; this field is what tells it the claim was rejected and exactly what remains."
 
 [schema.fields.proof]
 schema = "schema:text"

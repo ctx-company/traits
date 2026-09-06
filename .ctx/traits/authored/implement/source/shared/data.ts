@@ -91,7 +91,7 @@ export const proofCommand = cdk.slot.text({
 export const proofResult = cdk.slot.text({
   id: "proof-result",
   description:
-    "What the stage's proof command said about the worker's latest claim: the literal 'pass', or 'fail' with the exit code and the tail of the command's output. Written only when the worker claimed the stage complete; a claim that failed proof comes back to the worker with this text and costs no review.",
+    "What the stage's proof command said about the worker's latest claim: the literal 'pass', or 'fail' with the exit code and the tail of the command's output. Written only when the worker claimed the stage complete; a claim that failed proof comes back to the worker with this text and costs no review. A 'pass' is the mechanical floor — necessary, not sufficient: it means the command's checks held, never that the stage goal is met. Whether the stage is actually done is the reviewer's call, and a rejected claim comes back through the brief's last-claim even when this reads 'pass'.",
 });
 
 export const changedFiles = cdk.slot.text({

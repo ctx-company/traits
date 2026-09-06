@@ -51,8 +51,8 @@
   },
   "schema:work-report": {
     "file": "packages/toolkit/src/schema.ts",
-    "start": 356,
-    "end": 356
+    "start": 362,
+    "end": 362
   },
   "sequence:ctx-branch-arm-p-12-maybe-commit-then/commit-the-work": {
     "file": ".ctx/traits/authored/implement/source/variant/quick/index.ts",

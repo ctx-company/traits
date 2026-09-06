@@ -106,18 +106,18 @@
   },
   "schema:brief": {
     "file": "packages/toolkit/src/schema.ts",
-    "start": 271,
-    "end": 271
+    "start": 272,
+    "end": 272
   },
   "schema:closed-stage": {
     "file": "packages/toolkit/src/schema.ts",
-    "start": 326,
-    "end": 326
+    "start": 332,
+    "end": 332
   },
   "schema:disposition": {
     "file": "packages/toolkit/src/schema.ts",
-    "start": 398,
-    "end": 398
+    "start": 404,
+    "end": 404
   },
   "schema:implementation-draft": {
     "file": ".ctx/traits/authored/implement/source/shared/data.ts",
@@ -136,8 +136,8 @@
   },
   "schema:owner-item": {
     "file": "packages/toolkit/src/schema.ts",
-    "start": 492,
-    "end": 492
+    "start": 498,
+    "end": 498
   },
   "schema:plan-digest": {
     "file": ".ctx/traits/authored/implement/source/shared/data.ts",
@@ -146,8 +146,8 @@
   },
   "schema:review-verdict": {
     "file": "packages/toolkit/src/schema.ts",
-    "start": 580,
-    "end": 580
+    "start": 586,
+    "end": 586
   },
   "schema:stage": {
     "file": ".ctx/traits/authored/implement/source/shared/data.ts",
@@ -161,8 +161,8 @@
   },
   "schema:work-report": {
     "file": "packages/toolkit/src/schema.ts",
-    "start": 356,
-    "end": 356
+    "start": 362,
+    "end": 362
   },
   "sequence:ctx-branch-arm-p-12-maybe-commit-then/commit-the-work": {
     "file": ".ctx/traits/authored/implement/source/variant/basic/index.ts",

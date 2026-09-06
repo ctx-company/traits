@@ -1,0 +1,112 @@
+schema-version = "0.2"
+key = "0281.8"
+title = "The reviewer's rejection reaches the worker: the brief carries the verdict on the last claim"
+status = "done"
+raised = "2026-09-06"
+content = """
+This plan separates GOALS from APPROACH. The GOALS section is binding: each one
+names an observable outcome and what it excludes. The APPROACH section is the
+suggested route; deviate from it whenever a goal requires it and report the
+deviation in the work summary.
+
+Parent `0281`, follow-on to `0281.7`. Landed by hand on 2026-09-06 after
+0011.5 run 9fca0304 deadlocked on its `flip-cli` stage for ~6+ review
+rounds. The stage's frozen proof checked `src/surface/cli.rs` and
+`src/app/entry/cli` — both green — while the CLI ingress it was meant to
+flip still lived entirely in `src/main.rs` (139 `Command::` arms,
+`legacy_session_whoami`, `agent::session::resolution`). The worker moved
+the two files the proof named, satisfied the proof, and re-claimed the
+same commit as complete every round; the reviewer correctly rejected
+`cli-ingress-on-old-model` every round and wrote the real target
+(main.rs) into the brief.
+
+The owner's diagnosis, confirmed against `work.ts`: the worker's inputs
+are the plan, the brief, its own previous report, and the proof result —
+it NEVER sees the verdict, the blocker, or the fact that its completion
+claim was rejected. So each round it sees three signals and all three
+say "done": its own last report ("claim: complete"), a passing proof,
+and a forward-looking brief it cannot recognize AS a rejection. The
+reviewer knew the answer and put it in the brief, but the one fact that
+would move the worker — "your claim was rejected, and the passing proof
+does not prove it" — was stripped before the worker ever read it. This
+is a reviewer→worker communication gap, not an owner-escalation gap:
+summoning the owner to relay "do main.rs" when the reviewer already
+knows it is pointless ceremony. Owner escalation stays the backstop for
+what the reviewer genuinely cannot decide.
+
+## GOALS, binding
+
+1. **The worker learns its completion claim was rejected.** The brief
+   gains `last-claim`: the reviewer's response to the worker's last
+   completion claim, written FOR THE WORKER. When the last report claimed
+   the stage complete and the verdict does not accept it, it begins
+   `REJECTED:` and names the specific gap that keeps the stage open (the
+   failing done-when clause, the file and symbol still on the wrong
+   path). Empty when the last report made no completion claim. It is the
+   one field that tells the worker its claim was rejected and exactly
+   what remains.
+   Excluded: dumping the whole verdict on the worker; any reviewer-side
+   or runtime repeat-counter; a new escalation status.
+
+2. **A passing proof is necessary, not sufficient.** The proof result
+   the worker reads states plainly that a `pass` is the mechanical floor
+   — the command's checks held, never that the stage goal is met — and
+   that a rejected claim comes back through the brief's `last-claim` even
+   when the proof reads `pass`.
+   Excluded: making the proof the worker's definition of done.
+
+3. **The rejection rides the channel the worker already reads.**
+   `last-claim` is a field on the brief, so the existing deterministic
+   `carry-brief` projection carries it whole and the worker's frame
+   renders it beside its own field description — no new slot, no new
+   carry step, no new worker prompt line. The reviewer fills it from the
+   field's description like every other brief field.
+   Excluded: a prompt line teaching the worker how to weigh it — the
+   convention lives in the field description, not the prompt.
+"""
+scope = """
+## Decisions
+
+- No change to `review.ts`: the reviewer's duty to write its rejection
+  for the worker lives in the `last-claim` field description, not the
+  reviewer prompt (owner ruling: prompts carry task doctrine only,
+  conventions live in schema field descriptions).
+- No change to `work.ts`: the worker reads the whole brief, so a new
+  brief field is rendered to it automatically with its description.
+- The fix is general: it breaks any "confident worker re-claims a
+  rejected completion" loop — a mistargeted proof, a worker that trusts
+  a green screen over prose, a genuine worker/reviewer disagreement —
+  not only the flip-cli case that exposed it.
+- Owner escalation (`needs-owner` / the summons branch) is unchanged and
+  remains the backstop for a spec question the reviewer cannot resolve or
+  a worker that reports itself genuinely blocked.
+- `quick` is unaffected: it has no brief (the worker keeps its own
+  ledger through its report), so only the reviewed lanes gain the field.
+
+## Landed
+
+- Contract: packages/toolkit/src/schema.ts — `briefSchema` gains the
+  optional `last-claim` field; `BriefValue` updated; the brief's own
+  description notes it now carries the response to the last claim.
+- Trait: .ctx/traits/authored/implement/source/shared/data.ts — the
+  `proof-result` slot description clarifies that a pass is the floor, not
+  proof of done. Canonicals regenerated (basic, complex, annotate carry
+  the field; quick regenerates only its source map).
+"""
+validation = """
+## Done when
+
+- The TS packages build (`just ts-build`) and the implement trait builds
+  and checks valid under the landed binary.
+- `last-claim` is present in the basic, complex, and annotate canonicals;
+  quick carries no brief and is unaffected.
+- `proof_implement_notify.rs` stays green (the narration/sequence
+  structure is unchanged by a schema-field addition).
+- Live proof (owner runs): a restart of 0011.5 shows the worker, after a
+  rejected completion claim, receiving the rejection in its brief and
+  acting on the named gap instead of re-claiming the same commit.
+"""
+
+[relations]
+parent = "0281"
+depends-on = ["0281.7"]

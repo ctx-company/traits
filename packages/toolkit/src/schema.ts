@@ -251,6 +251,7 @@ export const stageStatusSchema: SchemaHandle<StageStatusValue> = schema.object(
 
 /** The worker's next unit of work, as accepted values. */
 export type BriefValue = {
+  readonly "last-claim"?: string;
   readonly stage: string;
   readonly goal: string;
   readonly proof: string;
@@ -271,6 +272,11 @@ export type BriefValue = {
 export const briefSchema: SchemaHandle<BriefValue> = schema.object(
   "brief",
   {
+    "last-claim": schema.field(schema.text(), {
+      required: false,
+      description:
+        "The reviewer's response to the worker's LAST completion claim, written FOR THE WORKER — the one thing the worker cannot otherwise learn, because it never sees the verdict, only this brief. When the worker's last report claimed the stage complete and this verdict does not accept it, begin with 'REJECTED:' and name the specific gap that keeps the stage open: the failing done-when clause, the file and symbol still on the wrong path, what the diff is missing. When the stage's proof passed but does not establish the goal, say so plainly — a passing proof is the mechanical floor, not proof of done, so it is not sufficient here. Empty or absent when the last report made no completion claim, or there was none. Without this the worker sees only its own 'complete' report and a passing proof — both telling it the stage is done — and re-claims the same state unchanged; this field is what tells it the claim was rejected and exactly what remains.",
+    }),
     stage: schema.field(schema.text(), {
       description: "The id of the first open stage in the stage ledger, verbatim from the plan.",
     }),
@@ -309,7 +315,7 @@ export const briefSchema: SchemaHandle<BriefValue> = schema.object(
   },
   {
     description:
-      "The worker's next unit of work: the first open stage with its goal, proof and commit flag verbatim from the plan, and the front step with its frozen done-when. The only part of the verdict the worker sees, so it must stand on its own.",
+      "The worker's next unit of work: the first open stage with its goal, proof and commit flag verbatim from the plan, the front step with its frozen done-when, and the reviewer's response to the worker's last claim. The only part of the verdict the worker sees, so it must stand on its own — including whether the last completion claim was rejected and why.",
   },
 );
 
