@@ -1,8 +1,9 @@
 schema-version = "0.2"
 key = "0282"
 title = "Mark swept ancestors done on family archive"
-status = "ready"
+status = "done"
 raised = "2026-09-07"
+closed = "2026-09-07"
 content = """
 When the last child of a task family closes, `FilesTaskBoard::update` (modules/io/src/task_files.rs:541-720) invokes `sweep_closed_ancestors` (:743-780), which walks up the parent chain and archives every finished ancestor via `archive_in_place` (:786-811). `archive_in_place` re-reads the live file, parses it with `ctx_traits_core::task::parse`, and writes it into `archived/` without mutating any parsed field — so archived ancestors keep their stale stored `status` (`ready`, or unset) and never receive a `closed` date, while the direct-close path in `update()` (:665-672) stamps both. The gap is visible in the raw archived TOML and in every surface that renders stored status (`stored_status_text`, modules/cli/src/app/tasks.rs:576-583).
 
