@@ -1,50 +1,54 @@
 schema-version = "0.2"
 key = "0282"
 title = "Mark swept ancestors done on family archive"
-status = "draft"
+status = "ready"
 raised = "2026-09-07"
 content = """
-When the last child of a task family closes, `FilesTaskBoard::update` (modules/io/src/task_files.rs) runs `sweep_closed_ancestors` (~line 743), which walks up the parent chain and archives every finished ancestor via `archive_in_place` (~line 786). That move deliberately keeps the file content untouched — so each archived ancestor document retains its stale stored `status` (e.g. `ready`, or unset) and gets no `closed` date, even though its whole family is done. The direct-close path in `update()` (~lines 663–679) stamps `status` and `closed = today_date_utc()` on close; the sweep path does not, and the gap is visible in the raw archived TOML and in surfaces that render stored status (`stored_status_text`, modules/cli/src/app/tasks.rs ~line 576, shows "unset"/"ready" for a fully-done archived parent).
+When the last child of a task family closes, `FilesTaskBoard::update` (modules/io/src/task_files.rs:541-720) invokes `sweep_closed_ancestors` (:743-780), which walks up the parent chain and archives every finished ancestor via `archive_in_place` (:786-811). `archive_in_place` re-reads the live file, parses it with `ctx_traits_core::task::parse`, and writes it into `archived/` without mutating any parsed field — so archived ancestors keep their stale stored `status` (`ready`, or unset) and never receive a `closed` date, while the direct-close path in `update()` (:665-672) stamps both. The gap is visible in the raw archived TOML and in every surface that renders stored status (`stored_status_text`, modules/cli/src/app/tasks.rs:576-583).
 
-This task closes that gap: every ancestor document that the sweep moves into `archived/` — the immediate parent and any grandparents the upward walk archives in the same sweep — must end up with stored `status = "done"` and a `closed` date in its own document, matching the direct-close path's stamping. The parent-with-children branch of `graph::derived_status` (modules/core/src/task/graph.rs, ~line 171) ignores stored status while children exist, so stamping on archive does not change derivation; the stored document is being corrected for readers of the document itself.
+This task stamps `status = "done"` and `closed = today_date_utc()` onto every ancestor document the sweep archives, at the provider layer, so every write path (CLI, dashboard, auto-close) is corrected at once with no surface changes.
 
-The fix belongs at the provider layer: every write path (CLI `tasks` commands, dashboard, auto-close) funnels through `FilesTaskBoard::update`, so no CLI/dashboard/desktop/toolkit surface changes are required — they all read the provider's output.
+This plan separates GOALS from APPROACH. The goals are the "## Done when" items in validation — each states an observable outcome with explicit exclusions and carries a verbatim Source quote from the raising draft; they are binding. Everything under "## Approach" is the architect's suggested route — expected symbols, edit order, proof shape, and commands — and the run may deviate from any of it whenever a goal requires, reporting the deviation in its work summary rather than treating it as a violation.
 """
 scope = """
 ## Decisions
-- In scope: the archive-on-close ancestor sweep path in modules/io/src/task_files.rs (`sweep_closed_ancestors` / `archive_in_place`), any core-type helper it needs (modules/core/src/task/), and test extensions in the same module.
-- The stamping applies to EVERY ancestor the sweep archives in one pass, not just the immediate parent — the upward walk can archive grandparents when closing the last child finishes them.
-- Every ancestor the sweep archives persists `status = "done"` and a `closed` date — including when the all-closed family contains cancelled children (`derived_status` already folds that case to `Done`); the sweep never writes `cancelled` onto an ancestor.
-- The sweep does NOT synthesize a `Closure` record: it has no check or merge provenance (the direct path only writes one when the caller passes `set_closure`), so the ancestor's `closure` field is left unchanged.
-- Out of scope: any change to `derived_status` semantics in modules/core/src/task/graph.rs; a reopen-cascade for ancestors (reopening today clears `closed`/`closure` on the one document only, and adding a cascade is scope creep); CLI, dashboard, toolkit, or desktop surface changes (desktop/ is a separate cargo project outside the workspace and only consumes summaries).
-- Doc comments on `sweep_closed_ancestors`/`archive_in_place` currently encode the "content untouched" contract; they are the stated design and must be updated to match the new stamping behavior.
+- The fix lives at the provider layer, in the sweep's own write path in modules/io/src/task_files.rs; no CLI, dashboard, toolkit, or desktop change (desktop/ is a separate cargo workspace consuming summaries only).
+- The stamp applies to EVERY ancestor archived in one sweep — the immediate parent and any grandparents the upward walk finishes in the same pass.
+- The persisted ancestor status is always `done`, never `cancelled`, even when the all-closed family contains cancelled children: `graph::derived_status` (modules/core/src/task/graph.rs:171-180) already folds mixed done/cancelled descendants to `Done`. Changing derivation semantics is expressly out of scope.
+- The sweep does NOT synthesize a `Closure` record — it has no check or merge provenance — and leaves an existing `closure` and every other field unchanged; the only mutated fields are `status` and `closed`.
+- Out of scope: a reopen cascade for ancestors (reopening today clears `closed`/`closure` on the one document only); any change to `EffectKind` or the observable effect-record shapes; the create-closed-task path (task_files.rs:504-535), which initializes `closed = None` and is a separate concern.
+- The rustdoc on `sweep_closed_ancestors` (:723-742) and `archive_in_place` (:783-785) states the old "content untouched" contract and misdescribes the error posture; both must be updated to match the new deliberate stamp and the preserved record-and-continue failure handling.
+
+## Approach
+Suggested route, not a boundary:
+- Seam: inside `archive_in_place` (task_files.rs:786-811), after the existing `parse` of the live ancestor and before the existing `write_document` call, set `status = Some(TaskStatus::Done)` and `closed = Some(today_date_utc())` on the parsed document. Reuse `ctx_traits_core::task::parse`, `write_document`, and the crate-private `today_date_utc()` at modules/io/src/audit_journal.rs:139-150 (already used by direct close). Preserve the already-archived early `Ok(None)` no-op and the destination-write-then-source-remove order.
+- Do NOT implement the stamp by recursively calling `update`: the direct archive operation intentionally avoids recursive effects, digest requirements, board-config re-evaluation, and additional sweeps.
+- A private IO-local helper shared with the eligible direct-close branch is optional; if factored, keep the existing nuance that direct close of an already-archived document changes status without replacing a pre-existing or absent `closed` date, while a newly archived ancestor always gets today's date. No core API change — moving clock-dependent behavior into core has no evidenced caller.
+- Proof: extend the family coverage next to `closing_the_last_child_archives_the_parent_too` (task_files.rs:1947-2001) with one tempdir fixture holding a grandparent, parent, and at least two children. Close one child as cancelled, then the last as done, so one `sweep_closed_ancestors` call archives both ancestors. Give the ancestors distinct initial states (e.g. parent `ready`, grandparent unset) so both stale forms provably become `done`; seed one ancestor with a valid non-empty `[closure]` and compare before/after so closure preservation is substantive. Read the archived documents back and assert placement, `status == Some(TaskStatus::Done)`, a `closed` date equal to `crate::audit_journal::today_date_utc()` (never a hard-coded calendar date), and other fields unchanged. Scratch fixtures only — no committed-board fixtures, no goldens.
+- Update the two rustdoc blocks named in Decisions in the same change.
+- Suggested commands: `CARGO_TARGET_DIR=target cargo test -p ctx-traits-io --lib` for the module, `just test-full` for the landing gate. If a gate flakes in this shared-cache worktree, isolate with `CARGO_TARGET_DIR=target` before trusting the failure.
 """
 validation = """
 ## Watch
-- `[effects] archive-on-close = false` must keep suppressing the whole ancestor sweep — `a_parent_is_not_archived_while_archive_on_close_is_false` (task_files.rs ~line 2004) pins this.
-- A closed LEAF keeps its stored closed status unconditionally; do not alter `derived_status` semantics (regression note in graph.rs from 2026-08-24: an archived-but-ready file once cascaded `blocked` through dozens of done tasks).
-- Preserve the sweep's error posture exactly: per-ancestor failures recorded as `EffectRecord { EffectKind::ArchivePlacement, EffectOutcome::Failed }`, never a rollback of the already-applied child write; the sweep re-reads the board so the child's close is visible; it stops at the first ancestor with open work and cycle-guards with a `seen` set.
-- Keep the effect vocabulary stable — `ArchivePlacement` applied/failed records are consumed by CLI output (modules/cli/src/app/tasks.rs ~line 571) and dashboard (~line 7937).
-- `TaskDocument` serde is `deny_unknown_fields`; write documents via `ctx_traits_core::task::serialize` (as `write_document` does). `archive_in_place` currently re-parses the file text rather than using the loaded snapshot — whatever it writes must keep round-tripping content untouched apart from the fields deliberately stamped.
-- Test doctrine: behavioral proofs on scratch fixtures only — tempdir + `write_task` as the surrounding task_files tests do; no tests depending on committed repo content, no behavior-freezing goldens.
-- Gates that outlive 120s need per-check timeout-ms; if a gate flakes in a shared-cache worktree, isolate with `CARGO_TARGET_DIR=target` before trusting the failure.
+- `[effects] archive-on-close = false` must keep suppressing the whole ancestor sweep — movement and stamping alike; `a_parent_is_not_archived_while_archive_on_close_is_false` (task_files.rs:2003-2036) pins this and must stay green.
+- Leaf semantics are separate and must remain intact: a leaf with stored `Done`/`Cancelled` returns it unconditionally before dependency blocking (graph.rs:181-199); `stored_closed_status_wins_over_open_dependency` and `one_open_task_does_not_cascade_through_a_closed_chain` protect the 2026-08-24 regression.
+- Preserve the sweep's error posture exactly: per-ancestor failures become `ArchivePlacement`/`Failed` effect records carrying the parent key and error text, never a rollback of the already-applied child write; only the initial post-write reload failure propagates; the walk uses one snapshot and cycle-guards with a seen-set.
+- Keep the effect vocabulary and observable record shapes stable: `EffectKind` stays the closed `ArchivePlacement`/`ReleaseDependents` pair, applied archive records keep carrying target paths, and consumers (tasks.rs:576-583, dashboard.rs:7929-7955) render the vector verbatim.
+- `TaskDocument` serde is `deny_unknown_fields`; keep writing through `write_document` / `ctx_traits_core::task::serialize`. The preservation contract is parsed-field equality, not byte-for-byte source equality.
 
 ## Done when
-Closing the last child of a fully-done family leaves every ancestor document the sweep moved into `archived/` with stored `status = "done"` and a `closed` date (consistent with the direct-close path), and `closure` unchanged — proven by tempdir behavioral tests in modules/io/src/task_files.rs that assert stored `status = "done"` and the `closed` date on BOTH the immediate parent and a grandparent archived in the same sweep, including a family whose closed descendants include a cancelled task (extending `closing_the_last_child_archives_the_parent_too`, which today asserts placement only), with `a_parent_is_not_archived_while_archive_on_close_is_false` still green and the `just test-full` landing gate passing.
+1. Every ancestor document that `sweep_closed_ancestors` moves into `archived/` — the immediate parent and any grandparents archived in the same sweep, including a family whose closed descendants include a cancelled task — ends with stored `status = "done"` and a `closed` date equal to the current UTC date produced by `today_date_utc()` (matching the direct-close path's stamp; a nonempty but stale or arbitrary date does not satisfy this), with `closure` and all other fields unchanged; the sweep never writes `cancelled` onto an ancestor, synthesizes no `Closure`, and stamps nothing when `archive-on-close = false` suppresses the sweep.
+   Source: "every ancestor document that the sweep moves into `archived/` — the immediate parent and any grandparents the upward walk archives in the same sweep — must end up with stored `status = "done"` and a `closed` date in its own document, matching the direct-close path's stamping."
+   Source: "Every ancestor the sweep archives persists `status = "done"` and a `closed` date — including when the all-closed family contains cancelled children (`derived_status` already folds that case to `Done`); the sweep never writes `cancelled` onto an ancestor."
+   Source: "The sweep does NOT synthesize a `Closure` record: it has no check or merge provenance (the direct path only writes one when the caller passes `set_closure`), so the ancestor's `closure` field is left unchanged."
+   Source: "`archive_in_place` currently re-parses the file text rather than using the loaded snapshot — whatever it writes must keep round-tripping content untouched apart from the fields deliberately stamped."
+   Source: "`[effects] archive-on-close = false` must keep suppressing the whole ancestor sweep — `a_parent_is_not_archived_while_archive_on_close_is_false` (task_files.rs ~line 2004) pins this."
+2. The behavior is proven by tempdir behavioral tests in modules/io/src/task_files.rs covering BOTH the immediate parent and a grandparent archived in one sweep, with the suppression test still green and `just test-full` passing; no test depends on committed repo content.
+   Source: "proven by tempdir behavioral tests in modules/io/src/task_files.rs that assert stored `status = "done"` and the `closed` date on BOTH the immediate parent and a grandparent archived in the same sweep, including a family whose closed descendants include a cancelled task (extending `closing_the_last_child_archives_the_parent_too`, which today asserts placement only), with `a_parent_is_not_archived_while_archive_on_close_is_false` still green and the `just test-full` landing gate passing."
+   Source: "Test doctrine: behavioral proofs on scratch fixtures only — tempdir + `write_task` as the surrounding task_files tests do; no tests depending on committed repo content, no behavior-freezing goldens."
+3. `derived_status` semantics in modules/core/src/task/graph.rs are untouched, and no CLI, dashboard, toolkit, or desktop surface changes; the stored document is corrected for readers of the document itself.
+   Source: "Out of scope: any change to `derived_status` semantics in modules/core/src/task/graph.rs; a reopen-cascade for ancestors (reopening today clears `closed`/`closure` on the one document only, and adding a cascade is scope creep); CLI, dashboard, toolkit, or desktop surface changes (desktop/ is a separate cargo project outside the workspace and only consumes summaries)."
+   Source: "stamping on archive does not change derivation; the stored document is being corrected for readers of the document itself."
+4. The doc comments on `sweep_closed_ancestors` and `archive_in_place` no longer state the old "content untouched" contract and instead describe the new stamping behavior.
+   Source: "Doc comments on `sweep_closed_ancestors`/`archive_in_place` currently encode the "content untouched" contract; they are the stated design and must be updated to match the new stamping behavior."
 """
-
-[[checks]]
-name = "task_files provider unit tests pass, including sweep stamping coverage"
-command = "cargo test -p ctx-traits-io --lib"
-timeout-ms = 900000
-
-[[checks]]
-name = "archive-on-close=false still suppresses the ancestor sweep"
-command = "cargo test -p ctx-traits-io --lib a_parent_is_not_archived_while_archive_on_close_is_false"
-timeout-ms = 900000
-expect = "1 passed"
-
-[[checks]]
-name = "full workspace landing gate"
-command = "just test-full"
-timeout-ms = 3600000
