@@ -737,9 +737,10 @@ impl Board {
     ///
     /// Re-reads the board rather than using the pre-write snapshot: the
     /// child's own close has to be visible for the parent to derive as Done.
-    /// Best-effort in spirit but not in error handling — a failure here is
-    /// returned, because an ancestor left on the board is exactly the bug
-    /// this exists to prevent, and silently swallowing it would recreate it.
+    /// Each newly archived ancestor is stamped `status = "done"` and with
+    /// today's UTC close date. Per-ancestor failures become Failed effect
+    /// records and the walk continues; only the initial reload failure
+    /// propagates.
     fn sweep_closed_ancestors(&self, key: &str) -> Result<Vec<EffectRecord>, WriteError> {
         let loaded = self.load()?;
         let mut effects = Vec::new();
@@ -780,9 +781,11 @@ impl Board {
         Ok(effects)
     }
 
-    /// Move one already-closed document into the archive, leaving its content
-    /// untouched. `Ok(None)` when it is already there — re-archiving is a
-    /// no-op, and must not report a placement change that did not happen.
+    /// Move one already-closed document into the archive, stamping its status
+    /// as done and its close date as today in UTC. Its closure and every other
+    /// field round-trip unchanged. `Ok(None)` when it is already there —
+    /// re-archiving is a no-op, and must not report a placement change that
+    /// did not happen.
     fn archive_in_place(
         &self,
         loaded: &LoadedBoard,
@@ -801,8 +804,10 @@ impl Board {
         let target_dir = self.archived_dir();
         let text = std::fs::read_to_string(current_path.as_std_path())
             .map_err(|e| provider_error(&current_path, e))?;
-        let document = ctx_traits_core::task::parse(&text)
+        let mut document = ctx_traits_core::task::parse(&text)
             .map_err(|e| WriteError::from(ProviderError(e.to_string())))?;
+        document.status = Some(TaskStatus::Done);
+        document.closed = Some(crate::audit_journal::today_date_utc());
         self.write_document(&target_dir, &file_name, &document)?;
         let target_path = target_dir.join(&file_name);
         std::fs::remove_file(current_path.as_std_path())
