@@ -16,23 +16,23 @@
   },
   "port:review-document-report": {
     "file": ".ctx/traits/authored/review/source/shared/step/review.ts",
-    "start": 185,
-    "end": 185
+    "start": 184,
+    "end": 184
   },
   "port:review-findings-report": {
     "file": ".ctx/traits/authored/review/source/shared/step/review.ts",
-    "start": 175,
-    "end": 175
+    "start": 174,
+    "end": 174
   },
   "port:review-verdict-report": {
     "file": ".ctx/traits/authored/review/source/shared/step/review.ts",
-    "start": 170,
-    "end": 170
+    "start": 169,
+    "end": 169
   },
   "port:review-verification-report": {
     "file": ".ctx/traits/authored/review/source/shared/step/review.ts",
-    "start": 180,
-    "end": 180
+    "start": 179,
+    "end": 179
   },
   "port:tree-status-report": {
     "file": ".ctx/traits/authored/review/source/shared/step/assert-clean.ts",
@@ -41,13 +41,13 @@
   },
   "prompt:review-the-range": {
     "file": ".ctx/traits/authored/review/source/shared/step/review.ts",
-    "start": 143,
-    "end": 143
+    "start": 141,
+    "end": 141
   },
   "prompt:verify-the-findings": {
     "file": ".ctx/traits/authored/review/source/shared/step/review.ts",
-    "start": 161,
-    "end": 161
+    "start": 159,
+    "end": 159
   },
   "schema:blocker": {
     "file": "packages/toolkit/src/schema.ts",
@@ -81,13 +81,13 @@
   },
   "schema:review-finding": {
     "file": ".ctx/traits/authored/review/source/shared/step/review.ts",
-    "start": 25,
-    "end": 25
+    "start": 26,
+    "end": 26
   },
   "schema:review-findings": {
     "file": ".ctx/traits/authored/review/source/shared/step/review.ts",
-    "start": 59,
-    "end": 59
+    "start": 57,
+    "end": 57
   },
   "schema:review-verdict": {
     "file": "packages/toolkit/src/schema.ts",
@@ -96,13 +96,13 @@
   },
   "schema:review-verification": {
     "file": ".ctx/traits/authored/review/source/shared/step/review.ts",
-    "start": 84,
-    "end": 84
+    "start": 82,
+    "end": 82
   },
   "schema:review-verification-item": {
     "file": ".ctx/traits/authored/review/source/shared/step/review.ts",
-    "start": 89,
-    "end": 89
+    "start": 87,
+    "end": 87
   },
   "schema:stage-status": {
     "file": "packages/toolkit/src/schema.ts",
@@ -141,8 +141,8 @@
   },
   "slot:candidate-findings": {
     "file": ".ctx/traits/authored/review/source/shared/step/review.ts",
-    "start": 70,
-    "end": 70
+    "start": 68,
+    "end": 68
   },
   "slot:commit-log": {
     "file": ".ctx/traits/authored/review/source/shared/step/evidence.ts",
@@ -156,8 +156,8 @@
   },
   "slot:findings": {
     "file": ".ctx/traits/authored/review/source/shared/step/review.ts",
-    "start": 77,
-    "end": 77
+    "start": 75,
+    "end": 75
   },
   "slot:review-document": {
     "file": ".ctx/traits/authored/review/source/shared/step/review.ts",
@@ -176,8 +176,8 @@
   },
   "slot:verification": {
     "file": ".ctx/traits/authored/review/source/shared/step/review.ts",
-    "start": 117,
-    "end": 117
+    "start": 115,
+    "end": 115
   },
   "trait:review": {
     "file": "[eval1]",

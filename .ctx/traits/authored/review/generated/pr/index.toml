@@ -1,6 +1,6 @@
 id = "review"
 schema-version = "0.5"
-version = "0.3.0"
+version = "0.3.1"
 name = "Review (PR)"
 description = "Deterministic evidence capture (diff --stat, log --oneline) -> reviewer pass (verdict, candidate findings, document) -> verifier pass (verification record, final findings) -> read-only assertion."
 summary = "Points a reviewer at a git range for a typed verdict, candidate findings and a review document, then a verifier that keeps only the findings it can restate as a failure path from the code; zero mutation of the reviewed tree."
@@ -357,7 +357,7 @@ description = "One defect verified in the changed region, with the failure path 
 [schema.fields.category]
 schema = "schema:text"
 required = true
-description = "The kind of defect: bug (wrong behavior), security (a boundary crossed or crossable), concurrency (races, locking, ordering), data (loss, corruption, wrong persistence or keys), api (a contract or interface misused or broken), perf (avoidable cost the change introduces), test_gap (a changed behavior nothing exercises), doc_defect (a comment, message, string or document that is wrong)."
+description = "The kind of defect: bug (wrong behavior or result), security (a boundary crossed or crossable), concurrency (races, locking, ordering), data (loss, corruption, wrong persistence or keys), api (a contract or interface misused or broken so a caller gets the wrong thing), perf (a measured cost on a path the range introduced), doc_defect (text a user or caller relies on that is wrong: a message, an error string, a documented contract)."
 allowed = [
     "bug",
     "security",
@@ -365,14 +365,13 @@ allowed = [
     "data",
     "api",
     "perf",
-    "test_gap",
     "doc_defect",
 ]
 
 [schema.fields.evidence]
 schema = "schema:text"
 required = true
-description = "The failure path that makes the defect observable: the triggering input or state, the call path from an entry point or caller that reaches the lines, and the wrong outcome, with the offending lines quoted verbatim. A description of what was read is not evidence; a defect whose failure path cannot be stated is a suspicion and belongs in the review document, not here."
+description = "The failure path that makes the defect observable: the triggering input or state, the call path from an entry point, caller or test that actually reaches the lines, and the wrong outcome at the end of it, with the offending lines quoted verbatim. A description of what was read is not evidence; a defect whose failure path cannot be stated is a suspicion and belongs in the review document."
 
 [schema.fields.line]
 schema = "schema:integer"
@@ -397,7 +396,7 @@ allowed = [
 [schema.fields.what]
 schema = "schema:text"
 required = true
-description = "The defect and its concrete consequence in one to three sentences that stand alone without the diff: what the code does, what it should do, and what goes wrong for whom."
+description = "The defect and its observable wrong outcome in one to three sentences that stand alone without the diff: what the code does, for which caller, input or state, and what goes wrong: a wrong value or result, a crash or hang, lost or corrupted data, a boundary crossed, a user-visible wrong text, or a measured cost. A statement that is merely true about the code (a test that is missing, a comment that disagrees with the code, an extra round trip, a file nothing references) is not a defect and does not belong here."
 
 [[schema]]
 id = "review-findings"
@@ -406,7 +405,7 @@ description = "A typed findings list for the range: what the code has, independe
 [schema.fields.findings]
 schema = "[schema:review-finding]"
 required = true
-description = "Every defect verified in the changed region, one entry per underlying issue, listed whether or not it blocks the merge and whether or not the code was already wrong before the range: a defect of any severity may sit beside an approved verdict, and the verdict never removes an entry from this list. Not findings: merge-gate judgments (over-build, duplication, taste, scope), notes about the reviewing environment or what could not be run, and suspicions not confirmed in the code; those belong in the review document. Empty when the changed region has no verified defect."
+description = "Every defect verified in the changed region, one entry per underlying issue, listed whether or not it blocks the merge and whether or not the code was already wrong before the range: a defect of any severity may sit beside an approved verdict, and the verdict never removes an entry from this list. Not findings: merge-gate judgments (over-build, duplication, taste, scope), missing tests or coverage, comments that disagree with the code, extra work with no measured effect, files nothing references, notes about the reviewing environment, and suspicions not confirmed in the code; those belong in the review document. Empty when the changed region has no verified defect."
 
 [[schema]]
 id = "review-verdict"
@@ -489,7 +488,7 @@ description = "The verifier's decision on one candidate finding."
 [schema.fields.disposition]
 schema = "schema:text"
 required = true
-description = "confirmed only when the verifier restated the failure path from code it opened itself: the triggering input or state, a caller, entry point or test that actually reaches the lines, and the wrong outcome. refuted when the code shows the failure cannot occur, naming the line that prevents it or the caller that never passes the triggering input. unverifiable when deciding would need a runtime, data or service the verifier cannot see; never used as a soft confirm."
+description = "confirmed only when both hold: the verifier restated the failure path from code it opened itself (the triggering input or state, a caller, entry point or test that actually reaches the lines, and the wrong outcome), and that outcome is a defect under the finding definition (a wrong value or result, a crash or hang, lost or corrupted data, a boundary crossed, a user-visible wrong text, a measured cost). That a candidate's statements are true is never enough: a missing test, a comment that disagrees with the code, an extra round trip with no measured effect, or an unreferenced file is refuted as not a defect even when every word of it is accurate. refuted also when the code shows the failure cannot occur, naming the line that prevents it or the caller that never passes the triggering input. unverifiable when deciding would need a runtime, data or service the verifier cannot see; never used as a soft confirm."
 allowed = [
     "confirmed",
     "refuted",
@@ -499,7 +498,7 @@ allowed = [
 [schema.fields.failure-path]
 schema = "schema:text"
 required = true
-description = "The failure path as restated from the code, with the lines quoted; required for confirmed, and for refuted the line or fact that blocks it. Empty only for unverifiable."
+description = "The failure path as restated from the code, with the lines quoted, ending in the wrong outcome; required for confirmed. For refuted, the line or fact that blocks the failure, or the sentence naming why the candidate is not a defect. Empty only for unverifiable."
 
 [schema.fields.index]
 schema = "schema:integer"
@@ -574,6 +573,7 @@ output = [
 text = """
 Verify the candidate findings {slot:candidate-findings} against the range {port:range}.
 Open the code yourself — "git show", "git diff {port:range} -- <file>", grep for callers and tests — the candidates' own evidence is a claim to check, never something to copy.
+A candidate stands only as a defect: a failure path you restated from the code that ends in a wrong observable outcome for some caller, input or state. True is not enough.
 Edit nothing — you are read-only.
 Return the verification record and the final findings list."""
 input = [
