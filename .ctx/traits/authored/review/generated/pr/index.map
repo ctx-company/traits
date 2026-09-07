@@ -4,6 +4,11 @@
     "start": 35,
     "end": 35
   },
+  "agent:verifier": {
+    "file": "packages/toolkit/src/agent.ts",
+    "start": 35,
+    "end": 35
+  },
   "port:range": {
     "file": ".ctx/traits/authored/review/source/shared/data.ts",
     "start": 3,
@@ -11,18 +16,23 @@
   },
   "port:review-document-report": {
     "file": ".ctx/traits/authored/review/source/shared/step/review.ts",
-    "start": 119,
-    "end": 119
+    "start": 185,
+    "end": 185
   },
   "port:review-findings-report": {
     "file": ".ctx/traits/authored/review/source/shared/step/review.ts",
-    "start": 114,
-    "end": 114
+    "start": 175,
+    "end": 175
   },
   "port:review-verdict-report": {
     "file": ".ctx/traits/authored/review/source/shared/step/review.ts",
-    "start": 109,
-    "end": 109
+    "start": 170,
+    "end": 170
+  },
+  "port:review-verification-report": {
+    "file": ".ctx/traits/authored/review/source/shared/step/review.ts",
+    "start": 180,
+    "end": 180
   },
   "port:tree-status-report": {
     "file": ".ctx/traits/authored/review/source/shared/step/assert-clean.ts",
@@ -31,8 +41,13 @@
   },
   "prompt:review-the-range": {
     "file": ".ctx/traits/authored/review/source/shared/step/review.ts",
-    "start": 93,
-    "end": 93
+    "start": 143,
+    "end": 143
+  },
+  "prompt:verify-the-findings": {
+    "file": ".ctx/traits/authored/review/source/shared/step/review.ts",
+    "start": 161,
+    "end": 161
   },
   "schema:blocker": {
     "file": "packages/toolkit/src/schema.ts",
@@ -66,18 +81,28 @@
   },
   "schema:review-finding": {
     "file": ".ctx/traits/authored/review/source/shared/step/review.ts",
-    "start": 23,
-    "end": 23
+    "start": 25,
+    "end": 25
   },
   "schema:review-findings": {
     "file": ".ctx/traits/authored/review/source/shared/step/review.ts",
-    "start": 56,
-    "end": 56
+    "start": 59,
+    "end": 59
   },
   "schema:review-verdict": {
     "file": "packages/toolkit/src/schema.ts",
     "start": 586,
     "end": 586
+  },
+  "schema:review-verification": {
+    "file": ".ctx/traits/authored/review/source/shared/step/review.ts",
+    "start": 84,
+    "end": 84
+  },
+  "schema:review-verification-item": {
+    "file": ".ctx/traits/authored/review/source/shared/step/review.ts",
+    "start": 89,
+    "end": 89
   },
   "schema:stage-status": {
     "file": "packages/toolkit/src/schema.ts",
@@ -91,8 +116,13 @@
   },
   "sequence:ctx-branch-arm-p-14-diff-non-empty-then/review-the-range": {
     "file": ".ctx/traits/authored/review/source/variant/pr/index.ts",
-    "start": 28,
-    "end": 28
+    "start": 29,
+    "end": 29
+  },
+  "sequence:ctx-branch-arm-p-14-diff-non-empty-then/verify-the-findings": {
+    "file": ".ctx/traits/authored/review/source/variant/pr/index.ts",
+    "start": 30,
+    "end": 30
   },
   "sequence:procedure/capture-the-commit-log": {
     "file": ".ctx/traits/authored/review/source/shared/step/evidence.ts",
@@ -106,8 +136,13 @@
   },
   "sequence:procedure/diff-non-empty": {
     "file": ".ctx/traits/authored/review/source/variant/pr/index.ts",
-    "start": 27,
-    "end": 27
+    "start": 28,
+    "end": 28
+  },
+  "slot:candidate-findings": {
+    "file": ".ctx/traits/authored/review/source/shared/step/review.ts",
+    "start": 70,
+    "end": 70
   },
   "slot:commit-log": {
     "file": ".ctx/traits/authored/review/source/shared/step/evidence.ts",
@@ -121,8 +156,8 @@
   },
   "slot:findings": {
     "file": ".ctx/traits/authored/review/source/shared/step/review.ts",
-    "start": 67,
-    "end": 67
+    "start": 77,
+    "end": 77
   },
   "slot:review-document": {
     "file": ".ctx/traits/authored/review/source/shared/step/review.ts",
@@ -138,6 +173,11 @@
     "file": ".ctx/traits/authored/review/source/shared/step/assert-clean.ts",
     "start": 4,
     "end": 4
+  },
+  "slot:verification": {
+    "file": ".ctx/traits/authored/review/source/shared/step/review.ts",
+    "start": 117,
+    "end": 117
   },
   "trait:review": {
     "file": "[eval1]",

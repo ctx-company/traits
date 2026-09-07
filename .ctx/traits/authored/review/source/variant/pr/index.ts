@@ -1,7 +1,8 @@
-// review (pr): the default flow plus a typed findings list. Same deterministic
-// evidence capture, same single read-only reviewer pass, same clean-tree
-// assertion; the reviewer additionally returns every defect it verified in the
-// changed region with severity and category, independent of the merge verdict.
+// review (pr): the default flow plus a verified findings list. Same deterministic
+// evidence capture and clean-tree assertion; two read-only seats in between.
+// The reviewer returns the verdict, the candidate findings and the document;
+// the verifier re-reads the range for each candidate and writes the final
+// findings list (confirmed candidates only) plus its per-candidate record.
 // The list is what the code has; the verdict is what to do about it.
 import { condition, defineVariant, flow, intent, useIntent } from "@ctx-traits/cdk";
 
@@ -11,10 +12,10 @@ export default function () {
   defineVariant("pr", {
     name: "Review (PR)",
     summary:
-      "Points a single reviewer at a git range and returns a typed verdict, a typed findings list (every verified defect with severity and category), and a rendered review document, with zero mutation of the reviewed tree.",
+      "Points a reviewer at a git range for a typed verdict, candidate findings and a review document, then a verifier that keeps only the findings it can restate as a failure path from the code; zero mutation of the reviewed tree.",
     metadata: { tag: ["first-party", "review", "read-only", "findings"] },
     description:
-      "Deterministic evidence capture (diff --stat, log --oneline) -> single reviewer pass returning verdict, findings and document -> read-only assertion.",
+      "Deterministic evidence capture (diff --stat, log --oneline) -> reviewer pass (verdict, candidate findings, document) -> verifier pass (verification record, final findings) -> read-only assertion.",
   });
   useIntent({
     require: [intent.ReviewBeforeFinal, intent.Leanness],
@@ -26,12 +27,14 @@ export default function () {
 
   flow.when("Diff Non-Empty", condition.not(condition.equals(shared.step.evidence.diffStat, "")), () => {
     shared.step.review.reviewPr("Review the range");
+    shared.step.review.verify("Verify the findings");
     shared.step.assertClean.assert("Assert the reviewed tree stayed clean");
   });
 
   return {
     reviewVerdictReport: shared.step.review.reviewVerdictReport,
     reviewFindingsReport: shared.step.review.reviewFindingsReport,
+    reviewVerificationReport: shared.step.review.reviewVerificationReport,
     reviewDocumentReport: shared.step.review.reviewDocumentReport,
     treeStatusReport: shared.step.assertClean.treeStatusReport,
   };

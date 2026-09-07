@@ -1,9 +1,9 @@
 id = "review"
 schema-version = "0.5"
-version = "0.2.0"
+version = "0.3.0"
 name = "Review (PR)"
-description = "Deterministic evidence capture (diff --stat, log --oneline) -> single reviewer pass returning verdict, findings and document -> read-only assertion."
-summary = "Points a single reviewer at a git range and returns a typed verdict, a typed findings list (every verified defect with severity and category), and a rendered review document, with zero mutation of the reviewed tree."
+description = "Deterministic evidence capture (diff --stat, log --oneline) -> reviewer pass (verdict, candidate findings, document) -> verifier pass (verification record, final findings) -> read-only assertion."
+summary = "Points a reviewer at a git range for a typed verdict, candidate findings and a review document, then a verifier that keeps only the findings it can restate as a failure path from the code; zero mutation of the reviewed tree."
 variant = "pr"
 
 [metadata]
@@ -45,7 +45,7 @@ id = "review-findings-report"
 direction = "output"
 schema = "schema:review-findings"
 optional = true
-description = "The reviewer's typed findings list (pr variant). Absent when the range held no changes."
+description = "The verified findings list (pr variant). Absent when the range held no changes."
 value = "slot:findings"
 
 [[port]]
@@ -57,12 +57,25 @@ description = "The reviewer's typed verdict. Absent when the range held no chang
 value = "slot:review-verdict"
 
 [[port]]
+id = "review-verification-report"
+direction = "output"
+schema = "schema:review-verification"
+optional = true
+description = "The verifier's per-candidate record (pr variant). Absent when the range held no changes."
+value = "slot:verification"
+
+[[port]]
 id = "tree-status-report"
 direction = "output"
 schema = "schema:text"
 optional = true
 description = "Uncommitted changes left in the reviewed tree, empty when none."
 value = "slot:tree-status"
+
+[[slot]]
+id = "candidate-findings"
+schema = "schema:review-findings"
+description = "The reviewer's candidate findings, written by the same step as the verdict and the document. Candidates, not the result: the verifier decides which of them are findings."
 
 [[slot]]
 id = "commit-log"
@@ -78,7 +91,7 @@ hint = "Index pattern — the reviewer opens actual content with its own tools (
 [[slot]]
 id = "findings"
 schema = "schema:review-findings"
-description = "The reviewer's typed findings for the range, written by the same reviewer step as the verdict and the document."
+description = "The final findings for the range, written by the verifier: the confirmed candidates verbatim, in candidate order, each with its evidence replaced by the failure path the verifier restated from the code. Nothing the verifier did not confirm appears here."
 
 [[slot]]
 id = "review-document"
@@ -94,6 +107,11 @@ description = "Reviewer's typed verdict on the range. No task board governs this
 id = "tree-status"
 schema = "schema:text"
 description = "The porcelain listing of uncommitted changes; empty when the reviewed tree stayed clean."
+
+[[slot]]
+id = "verification"
+schema = "schema:review-verification"
+description = "The verifier's per-candidate record, written together with the final findings."
 
 [[schema]]
 id = "blocker"
@@ -334,7 +352,7 @@ description = 'The closest in-run verification actually produced and verified by
 
 [[schema]]
 id = "review-finding"
-description = "One defect the reviewer verified in the changed region."
+description = "One defect verified in the changed region, with the failure path that makes it observable."
 
 [schema.fields.category]
 schema = "schema:text"
@@ -354,7 +372,7 @@ allowed = [
 [schema.fields.evidence]
 schema = "schema:text"
 required = true
-description = "The offending lines quoted verbatim, and what was read or run to confirm the defect."
+description = "The failure path that makes the defect observable: the triggering input or state, the call path from an entry point or caller that reaches the lines, and the wrong outcome, with the offending lines quoted verbatim. A description of what was read is not evidence; a defect whose failure path cannot be stated is a suspicion and belongs in the review document, not here."
 
 [schema.fields.line]
 schema = "schema:integer"
@@ -383,7 +401,7 @@ description = "The defect and its concrete consequence in one to three sentences
 
 [[schema]]
 id = "review-findings"
-description = "The typed findings list for the range: what the code has, independent of what to do about it."
+description = "A typed findings list for the range: what the code has, independent of what to do about it."
 
 [schema.fields.findings]
 schema = "[schema:review-finding]"
@@ -456,6 +474,43 @@ required = true
 description = 'Stable wall id copied VERBATIM from an explicit "**Wall:** <id>" label in the task file, non-empty only when status is revise and that label exists — never inferred from prose similarity or blocker content. Enables cross-run standing-wall refusal (P414); an empty string here never blocks a sibling run no matter how related its blockers look. Always present (never omitted) so the runtime can deterministically copy it into a park report without a missing-field failure.'
 
 [[schema]]
+id = "review-verification"
+description = "The verifier's record over the candidate findings: what was confirmed, refuted or left unverifiable, and why."
+
+[schema.fields.candidates]
+schema = "[schema:review-verification-item]"
+required = true
+description = "One decision per candidate, every candidate present exactly once, in candidate order."
+
+[[schema]]
+id = "review-verification-item"
+description = "The verifier's decision on one candidate finding."
+
+[schema.fields.disposition]
+schema = "schema:text"
+required = true
+description = "confirmed only when the verifier restated the failure path from code it opened itself: the triggering input or state, a caller, entry point or test that actually reaches the lines, and the wrong outcome. refuted when the code shows the failure cannot occur, naming the line that prevents it or the caller that never passes the triggering input. unverifiable when deciding would need a runtime, data or service the verifier cannot see; never used as a soft confirm."
+allowed = [
+    "confirmed",
+    "refuted",
+    "unverifiable",
+]
+
+[schema.fields.failure-path]
+schema = "schema:text"
+required = true
+description = "The failure path as restated from the code, with the lines quoted; required for confirmed, and for refuted the line or fact that blocks it. Empty only for unverifiable."
+
+[schema.fields.index]
+schema = "schema:integer"
+required = true
+description = "Position of the candidate in the candidate findings list, counting from zero."
+
+[schema.fields.note]
+schema = "schema:text"
+description = "One sentence for the human: why this disposition, in the verifier's own words."
+
+[[schema]]
 id = "stage-status"
 description = "One plan stage in the verdict's ledger: id, whether its goal holds, the evidence, and the owner's ruling on it when one exists."
 
@@ -487,6 +542,11 @@ id = "reviewer"
 description = "Reviews an arbitrary git ref/range with no task board governing the run and writes both the typed verdict and the human review document."
 summary = "Standalone review role."
 
+[[agent]]
+id = "verifier"
+description = "Re-reads the range for each candidate finding and keeps only those it can restate as a concrete failure path from the code; refutes or marks unverifiable the rest."
+summary = "Verification role."
+
 [prompt.review-the-range]
 text = """
 Review the range {port:range}. Commit log: {slot:commit-log}. File-level diff inventory (never the full patch): {slot:diff-stat}.
@@ -498,7 +558,7 @@ Review the range {port:range}. Commit log: {slot:commit-log}. File-level diff in
                     A BLOCKER makes the work genuinely unmergeable: a correctness bug, a house-rule violation, a gate the phase's own Definition of Done requires that is failing, clear over-build (accretion, defensive validation for impossible states, scope creep), OR un-abstracted duplication — logic re-implemented or copied where existing code should have been reused or a shared abstraction extracted. Everything else — subjective style, naming, taste, optional improvements, follow-up — is ADVISORY.
                     Report each blocker as a typed entry: a stable kebab-case id (reused verbatim if it returns), where (paths), what (the defect and its failure), root-cause (the missing invariant, not just where it shows), required-fix (the invariant an acceptable fix must establish and what to replace or delete — never just the cited call sites), and done-when (the falsifiable check you will apply next round). A blocker with recurrence-of set is proof the prior fix treated a symptom: state in root-cause why it was symptomatic, prescribe the structural fix in required-fix, and make clear that another point-patch at the cited sites will not clear it — for recurring duplication that means consolidate into one shared path and delete the copy, and do not approve until the duplicate is gone rather than the named case merely fixed. On a recurrence, two further duties. FIRST, enumerate the COMPLETE remaining divergence now — every responsibility the shared path must still absorb — not merely the symptom that exposed it this round: a worker who satisfies a partial list meets a longer list next round and learns that complying does not clear the blocker. SECOND, the required-fix must now name symbols: the exact functions/types to create, the exact functions that must no longer exist, and the call sites to route; and done-when must include at least one command the worker can run to see the structural state red or green for itself.
                     Put blocking defects in the blockers field and non-blocking notes in advisory. Set status to revise only when blockers is non-empty; otherwise approved — advisory never blocks. Do not promote taste to a blocker to earn another round. Return the typed verdict.
-    Write the typed verdict, the typed findings list, and a rendered human review document: what the range does, each finding and why it carries its severity, which findings block the merge and why, and anything advisory."""
+    Write the typed verdict, the candidate findings, and a rendered human review document: what the range does, each candidate and why it carries its severity, which of them block the merge and why, and anything advisory. A second seat verifies the candidates afterwards; list what you found, it decides what stands."""
 input = [
     "port:range",
     "slot:commit-log",
@@ -506,8 +566,23 @@ input = [
 ]
 output = [
     "slot:review-verdict",
-    "slot:findings",
+    "slot:candidate-findings",
     "slot:review-document",
+]
+
+[prompt.verify-the-findings]
+text = """
+Verify the candidate findings {slot:candidate-findings} against the range {port:range}.
+Open the code yourself — "git show", "git diff {port:range} -- <file>", grep for callers and tests — the candidates' own evidence is a claim to check, never something to copy.
+Edit nothing — you are read-only.
+Return the verification record and the final findings list."""
+input = [
+    "slot:candidate-findings",
+    "port:range",
+]
+output = [
+    "slot:verification",
+    "slot:findings",
 ]
 
 [[sequence.ctx-branch-arm-p-14-diff-non-empty-then.sequence]]
@@ -522,8 +597,22 @@ input = [
 ]
 output = [
     "slot:review-verdict",
-    "slot:findings",
+    "slot:candidate-findings",
     "slot:review-document",
+]
+
+[[sequence.ctx-branch-arm-p-14-diff-non-empty-then.sequence]]
+id = "verify-the-findings"
+title = "Verify the findings"
+agent = "agent:verifier"
+prompt = "prompt:verify-the-findings"
+input = [
+    "slot:candidate-findings",
+    "port:range",
+]
+output = [
+    "slot:verification",
+    "slot:findings",
 ]
 
 [[sequence.ctx-branch-arm-p-14-diff-non-empty-then.sequence]]
@@ -539,12 +628,13 @@ argv = [
 ]
 
 [procedure]
-description = "Deterministic evidence capture (diff --stat, log --oneline) -> single reviewer pass returning verdict, findings and document -> read-only assertion."
+description = "Deterministic evidence capture (diff --stat, log --oneline) -> reviewer pass (verdict, candidate findings, document) -> verifier pass (verification record, final findings) -> read-only assertion."
 input = ["port:range"]
 output = [
     "port:review-document-report",
     "port:review-findings-report",
     "port:review-verdict-report",
+    "port:review-verification-report",
     "port:tree-status-report",
 ]
 

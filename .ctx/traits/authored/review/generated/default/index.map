@@ -11,13 +11,13 @@
   },
   "port:review-document-report": {
     "file": ".ctx/traits/authored/review/source/shared/step/review.ts",
-    "start": 119,
-    "end": 119
+    "start": 185,
+    "end": 185
   },
   "port:review-verdict-report": {
     "file": ".ctx/traits/authored/review/source/shared/step/review.ts",
-    "start": 109,
-    "end": 109
+    "start": 170,
+    "end": 170
   },
   "port:tree-status-report": {
     "file": ".ctx/traits/authored/review/source/shared/step/assert-clean.ts",
@@ -26,8 +26,8 @@
   },
   "prompt:review-the-range": {
     "file": ".ctx/traits/authored/review/source/shared/step/review.ts",
-    "start": 77,
-    "end": 77
+    "start": 127,
+    "end": 127
   },
   "schema:blocker": {
     "file": "packages/toolkit/src/schema.ts",
