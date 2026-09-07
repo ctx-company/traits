@@ -1,16 +1,17 @@
 id = "review"
 schema-version = "0.5"
 version = "0.2.0"
-name = "Review (Default)"
-description = "Deterministic evidence capture (diff --stat, log --oneline) -> single reviewer pass -> read-only assertion."
-summary = "Points a single reviewer at a git range and returns a typed verdict plus a rendered review document, with zero mutation of the reviewed tree."
-variant = "default"
+name = "Review (PR)"
+description = "Deterministic evidence capture (diff --stat, log --oneline) -> single reviewer pass returning verdict, findings and document -> read-only assertion."
+summary = "Points a single reviewer at a git range and returns a typed verdict, a typed findings list (every verified defect with severity and category), and a rendered review document, with zero mutation of the reviewed tree."
+variant = "pr"
 
 [metadata]
 tag = [
     "first-party",
     "review",
     "read-only",
+    "findings",
 ]
 
 [[intent.require]]
@@ -40,6 +41,14 @@ description = "The rendered human review document. Absent when the range held no
 value = "slot:review-document"
 
 [[port]]
+id = "review-findings-report"
+direction = "output"
+schema = "schema:review-findings"
+optional = true
+description = "The reviewer's typed findings list (pr variant). Absent when the range held no changes."
+value = "slot:findings"
+
+[[port]]
 id = "review-verdict-report"
 direction = "output"
 schema = "schema:review-verdict"
@@ -65,6 +74,11 @@ id = "diff-stat"
 schema = "schema:text"
 description = "git diff --stat output for the range: file inventory only, never patch bodies."
 hint = "Index pattern — the reviewer opens actual content with its own tools (git show, git diff <range> -- <file>)."
+
+[[slot]]
+id = "findings"
+schema = "schema:review-findings"
+description = "The reviewer's typed findings for the range, written by the same reviewer step as the verdict and the document."
 
 [[slot]]
 id = "review-document"
@@ -319,6 +333,64 @@ required = true
 description = 'The closest in-run verification actually produced and verified by the reviewer (tests, dry runs, static checks); "none possible" only when truly nothing applies.'
 
 [[schema]]
+id = "review-finding"
+description = "One defect the reviewer verified in the changed region."
+
+[schema.fields.category]
+schema = "schema:text"
+required = true
+description = "The kind of defect: bug (wrong behavior), security (a boundary crossed or crossable), concurrency (races, locking, ordering), data (loss, corruption, wrong persistence or keys), api (a contract or interface misused or broken), perf (avoidable cost the change introduces), test_gap (a changed behavior nothing exercises), doc_defect (a comment, message, string or document that is wrong)."
+allowed = [
+    "bug",
+    "security",
+    "concurrency",
+    "data",
+    "api",
+    "perf",
+    "test_gap",
+    "doc_defect",
+]
+
+[schema.fields.evidence]
+schema = "schema:text"
+required = true
+description = "The offending lines quoted verbatim, and what was read or run to confirm the defect."
+
+[schema.fields.line]
+schema = "schema:integer"
+description = "Line of that file, at the head of the range, where the defect is; the first line when it spans several. Absent only when the defect has no single location."
+
+[schema.fields.path]
+schema = "schema:text"
+required = true
+description = "Repo-relative path of the file the finding is in."
+
+[schema.fields.severity]
+schema = "schema:text"
+required = true
+description = "Impact if merged as is, never confidence: critical breaks or exposes something for every caller; high is a real defect on a main path; medium a real defect on a narrower path, or a correctness gap with a bounded blast radius; low a real defect with little practical impact."
+allowed = [
+    "low",
+    "medium",
+    "high",
+    "critical",
+]
+
+[schema.fields.what]
+schema = "schema:text"
+required = true
+description = "The defect and its concrete consequence in one to three sentences that stand alone without the diff: what the code does, what it should do, and what goes wrong for whom."
+
+[[schema]]
+id = "review-findings"
+description = "The typed findings list for the range: what the code has, independent of what to do about it."
+
+[schema.fields.findings]
+schema = "[schema:review-finding]"
+required = true
+description = "Every defect verified in the changed region, one entry per underlying issue, listed whether or not it blocks the merge and whether or not the code was already wrong before the range: a defect of any severity may sit beside an approved verdict, and the verdict never removes an entry from this list. Not findings: merge-gate judgments (over-build, duplication, taste, scope), notes about the reviewing environment or what could not be run, and suspicions not confirmed in the code; those belong in the review document. Empty when the changed region has no verified defect."
+
+[[schema]]
 id = "review-verdict"
 description = "Typed review verdict. The loop blocks on genuine defects, clear over-build, and un-abstracted duplication — not on taste; status is revise if and only if an open step remains; every step carries a frozen done-when the runtime keeps from moving, and a claim is graded against it as written; the brief is what the worker sees next; escalation flags run-level owner blockers for triage without stopping the loop; owner-items records the verified outside-capability remainder so the run can complete honestly; owner annotations are applied to this verdict by the reviewer and accounted for in dispositions — they are binding edits, never arguments, and a step the owner deferred or dropped is never reopened by the reviewer."
 
@@ -426,7 +498,7 @@ Review the range {port:range}. Commit log: {slot:commit-log}. File-level diff in
                     A BLOCKER makes the work genuinely unmergeable: a correctness bug, a house-rule violation, a gate the phase's own Definition of Done requires that is failing, clear over-build (accretion, defensive validation for impossible states, scope creep), OR un-abstracted duplication — logic re-implemented or copied where existing code should have been reused or a shared abstraction extracted. Everything else — subjective style, naming, taste, optional improvements, follow-up — is ADVISORY.
                     Report each blocker as a typed entry: a stable kebab-case id (reused verbatim if it returns), where (paths), what (the defect and its failure), root-cause (the missing invariant, not just where it shows), required-fix (the invariant an acceptable fix must establish and what to replace or delete — never just the cited call sites), and done-when (the falsifiable check you will apply next round). A blocker with recurrence-of set is proof the prior fix treated a symptom: state in root-cause why it was symptomatic, prescribe the structural fix in required-fix, and make clear that another point-patch at the cited sites will not clear it — for recurring duplication that means consolidate into one shared path and delete the copy, and do not approve until the duplicate is gone rather than the named case merely fixed. On a recurrence, two further duties. FIRST, enumerate the COMPLETE remaining divergence now — every responsibility the shared path must still absorb — not merely the symptom that exposed it this round: a worker who satisfies a partial list meets a longer list next round and learns that complying does not clear the blocker. SECOND, the required-fix must now name symbols: the exact functions/types to create, the exact functions that must no longer exist, and the call sites to route; and done-when must include at least one command the worker can run to see the structural state red or green for itself.
                     Put blocking defects in the blockers field and non-blocking notes in advisory. Set status to revise only when blockers is non-empty; otherwise approved — advisory never blocks. Do not promote taste to a blocker to earn another round. Return the typed verdict.
-    Write both the typed verdict and a rendered human review document: what the range does, the blockers you found (if any) and why each is one, and anything advisory."""
+    Write the typed verdict, the typed findings list, and a rendered human review document: what the range does, each finding and why it carries its severity, which findings block the merge and why, and anything advisory."""
 input = [
     "port:range",
     "slot:commit-log",
@@ -434,6 +506,7 @@ input = [
 ]
 output = [
     "slot:review-verdict",
+    "slot:findings",
     "slot:review-document",
 ]
 
@@ -449,6 +522,7 @@ input = [
 ]
 output = [
     "slot:review-verdict",
+    "slot:findings",
     "slot:review-document",
 ]
 
@@ -465,10 +539,11 @@ argv = [
 ]
 
 [procedure]
-description = "Deterministic evidence capture (diff --stat, log --oneline) -> single reviewer pass -> read-only assertion."
+description = "Deterministic evidence capture (diff --stat, log --oneline) -> single reviewer pass returning verdict, findings and document -> read-only assertion."
 input = ["port:range"]
 output = [
     "port:review-document-report",
+    "port:review-findings-report",
     "port:review-verdict-report",
     "port:tree-status-report",
 ]
