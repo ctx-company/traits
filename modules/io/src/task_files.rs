@@ -2006,6 +2006,98 @@ mod tests {
     }
 
     #[test]
+    fn closing_the_last_child_stamps_each_archived_ancestor() {
+        let board_dir = tempdir();
+        write_task(
+            &board_dir,
+            "0010-grandparent.toml",
+            "schema-version = \"0.2\"\nkey = \"0010\"\ntitle = \"Grandparent\"\ncontent = \"Grandparent content\"\n\n[closure]\nmode = \"checked\"\ncommit = \"abc1234\"\n\n[[closure.checks]]\nname = \"unit tests\"\ncommand = \"cargo test\"\noutcome = \"passed\"\ndetail = \"exit 0\"\n",
+        );
+        write_task(
+            &board_dir,
+            "0010.1-parent.toml",
+            "schema-version = \"0.2\"\nkey = \"0010.1\"\ntitle = \"Parent\"\nstatus = \"ready\"\ncontent = \"Parent content\"\n\n[relations]\nparent = \"0010\"\n",
+        );
+        for (file, key, title) in [
+            ("0010.1.1-cancelled.toml", "0010.1.1", "Cancelled child"),
+            ("0010.1.2-done.toml", "0010.1.2", "Done child"),
+        ] {
+            write_task(
+                &board_dir,
+                file,
+                &format!(
+                    "schema-version = \"0.2\"\nkey = \"{key}\"\ntitle = \"{title}\"\nstatus = \"ready\"\n\n[relations]\nparent = \"0010.1\"\n"
+                ),
+            );
+        }
+
+        let grandparent_before = ctx_traits_core::task::parse(
+            &std::fs::read_to_string(board_dir.join("0010-grandparent.toml").as_std_path())
+                .unwrap(),
+        )
+        .unwrap();
+        let parent_before = ctx_traits_core::task::parse(
+            &std::fs::read_to_string(board_dir.join("0010.1-parent.toml").as_std_path()).unwrap(),
+        )
+        .unwrap();
+        assert!(grandparent_before.closure.is_some());
+
+        let write = FilesTaskBoard::open_read_write(board_dir.clone());
+        write
+            .update(
+                "0010.1.1",
+                TaskUpdate {
+                    status: Some(TaskStatus::Cancelled),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        write
+            .update(
+                "0010.1.2",
+                TaskUpdate {
+                    status: Some(TaskStatus::Done),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+
+        let archived_parent = ctx_traits_core::task::parse(
+            &std::fs::read_to_string(
+                board_dir
+                    .join(ARCHIVED_DIR)
+                    .join("0010.1-parent.toml")
+                    .as_std_path(),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let archived_grandparent = ctx_traits_core::task::parse(
+            &std::fs::read_to_string(
+                board_dir
+                    .join(ARCHIVED_DIR)
+                    .join("0010-grandparent.toml")
+                    .as_std_path(),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let close_date = crate::audit_journal::today_date_utc();
+
+        for document in [&archived_parent, &archived_grandparent] {
+            assert_eq!(document.status, Some(TaskStatus::Done));
+            assert_eq!(document.closed, Some(close_date.clone()));
+        }
+        assert_eq!(archived_parent.title, parent_before.title);
+        assert_eq!(archived_parent.relations, parent_before.relations);
+        assert_eq!(archived_parent.content, parent_before.content);
+        assert_eq!(archived_grandparent.title, grandparent_before.title);
+        assert_eq!(archived_grandparent.relations, grandparent_before.relations);
+        assert_eq!(archived_grandparent.content, grandparent_before.content);
+        assert_eq!(archived_grandparent.closure, grandparent_before.closure);
+    }
+
+    #[test]
     fn a_parent_is_not_archived_while_archive_on_close_is_false() {
         let board_dir = tempdir();
         write_task(
