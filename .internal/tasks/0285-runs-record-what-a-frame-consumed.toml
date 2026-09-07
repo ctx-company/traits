@@ -1,0 +1,97 @@
+schema-version = "0.2"
+key = "0285"
+title = "Runs record what a frame consumed: input, cache and output tokens, and the harness's own cost and API time"
+status = "ready"
+raised = "2026-09-07"
+content = """
+This plan separates GOALS from APPROACH. The GOALS section is binding: each one
+names an observable outcome and what it excludes. The APPROACH section is the
+suggested route; deviate from it whenever a goal requires it and report the
+deviation in the work summary.
+
+Why now (2026-09-07). The code-review benchmark (~/ctx-company/benchmarks)
+wants to publish, per reviewed PR, how long a review frame took and what it
+would have cost, from the ledger rather than from impressions. Today a run
+records wall seconds, tool calls and retries per frame (`sessions report`) and
+output tokens only, split by seat and by model, on the terminal drive outcome.
+A reviewer that reads ten to fifty files is input-dominated, so output tokens
+alone understate its cost by an order of magnitude. Both harnesses already emit
+the missing numbers on their streams: Claude Code's final `result` event carries
+input, cache-creation, cache-read and output tokens, its own `total_cost_usd` at
+list price (computed even on a subscription seat), `duration_api_ms` and
+`num_turns`; opencode's step events carry input, output, reasoning and cache
+tokens and a per-step cost. ctx.traits reads only `output_tokens` from either.
+
+## GOALS, binding
+
+1. **Every harness frame records what it consumed.** For each agent frame the
+   ledger holds input tokens, cache-read tokens, cache-write tokens, output
+   tokens, and, when the harness reports them, its own cost estimate in USD,
+   API time and turn count, keyed by seat and model. A value the harness never
+   reported is absent, never a fabricated zero (the doctrine
+   `TokenUsageEvidence` already states).
+   Excluded: calling any provider billing API; changing what counts toward the
+   `[budget] max-tokens` ceiling (still output tokens).
+
+2. **The report shows it.** `ctx traits sessions report` prints the per-frame
+   and total token classes and the harness-reported cost, in the text table and
+   in `--json`, next to seconds, tool calls and retries. A ledger written before
+   this task still loads and reports the new columns as absent.
+
+3. **The estimate uses every class it knows.** Where `[pricing."<model>"]`
+   carries rates for input, cache-read, cache-write and output tokens, the
+   estimated cost uses them; a table with only the existing `usd-per-mtok`
+   keeps today's output-only estimate. A harness-reported cost is recorded
+   beside the estimate, never merged into it, so the two stay comparable.
+   Excluded: pricing subscription seats; a flat-fee seat keeps marginal cost
+   zero for actual spend while its harness-reported list-price figure is still
+   recorded.
+
+4. **Proven.** Unit tests over fixture events for both harness streams,
+   including a `result` event with and without `usage`, and a report test over
+   an old ledger without the new fields.
+"""
+scope = """
+## Decisions
+
+- Wire field names are verified against the live harnesses before they are
+  parsed (`claude -p --output-format stream-json`, `opencode run --format
+  json`), not taken from memory; the names in the content are the expected
+  ones.
+- Harness-reported cost and ctx's own estimate are two facts, both kept.
+- Subscription seats are not priced for actual spend (unchanged); the
+  list-price figure the harness reports is still evidence.
+
+## APPROACH, suggested route
+
+- `modules/io/src/harness.rs` around `top_level_output_tokens`,
+  `message_output_tokens` and `opencode_step_output_tokens`: read the full
+  `usage` object of Claude Code's `result` event (and `modelUsage` per model
+  when present) and opencode's `part.tokens` / `part.cost`.
+- `modules/core/src/procedure/session.rs`: widen `TokenUsageEvidence` and the
+  `DriveOutcome` `tokens_by_model` map into per-class counts plus reported cost
+  and API time; keep the old fields readable.
+- `modules/cli/src/app/session_report.rs`: `FrameRow` and `Totals` gain the
+  token classes and cost; the text table gets the columns.
+- `modules/io/src/harness_config.rs` `ModelPricing`: optional per-class rates
+  beside `usd-per-mtok`.
+"""
+validation = """
+## Watch
+
+- Claude Code repeats usage snapshots per message with a growing total and
+  streams subagent messages under their own ids; the `result` event is the
+  authoritative total, per-message snapshots are not summed on top of it.
+- opencode's step tokens are per step; totals are sums, not maxima.
+
+## Done when
+
+- A run on the claude-code harness and one on opencode each show, in
+  `sessions report --json`, per-frame input, cache-read, cache-write and
+  output tokens, and for claude-code a harness-reported cost and API time.
+- A ledger from before this task reports the new fields as absent and is
+  otherwise unchanged.
+- The workspace gate is green.
+"""
+
+[relations]
