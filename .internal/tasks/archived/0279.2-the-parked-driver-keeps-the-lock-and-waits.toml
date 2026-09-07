@@ -1,8 +1,10 @@
 schema-version = "0.2"
 key = "0279.2"
 title = "The parked driver keeps the lock and waits for its answer"
-status = "ready"
+status = "done"
 raised = "2026-09-03"
+closed = "2026-09-06"
+origin = "run run-3653f7a2d4f1a750e24009a3f9792e0081efecb0b060bbb37aac606180e824d8 merged as df00f7e28a067248b494099503e0ab241ae661d8"
 content = """
 This plan separates GOALS from APPROACH. The GOALS section is binding: each
 names an observable outcome, what decides it, and what it excludes. The
@@ -182,3 +184,25 @@ expect = 'test result: ok\. [1-9][0-9]* passed'
 name = "workspace gate is green"
 command = "just test"
 timeout-ms = 1800000
+
+[closure]
+mode = "merge"
+commit = "df00f7e28a067248b494099503e0ab241ae661d8"
+
+[[closure.checks]]
+name = "run_control transport suite is green including answer delivery"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-io run_control"
+outcome = "failed"
+detail = "exited 101"
+
+[[closure.checks]]
+name = "summons process proofs are green including the waiting driver"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --test proof_summons"
+outcome = "failed"
+detail = "exited 101"
+
+[[closure.checks]]
+name = "workspace gate is green"
+command = "just test"
+outcome = "failed"
+detail = "exited 1"

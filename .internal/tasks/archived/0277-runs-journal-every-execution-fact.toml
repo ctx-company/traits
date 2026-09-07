@@ -1,0 +1,135 @@
+schema-version = "0.2"
+key = "0277"
+title = "Runs journal every execution fact — what ran, when, what it printed, who decided what"
+status = "ready"
+raised = "2026-09-01"
+content = """
+Charter. This parent carries the shared intent and the umbrella stop
+condition; the execution plans live in its children 0277.1 through
+0277.5, which land in dependency order.
+
+Owner order 2026-09-01, after a day of forensics where four separate
+run deaths were undiagnosable from artifacts. Each incident is a
+verified case where the machinery knew something and recorded
+nothing; together they define exactly what the journal must capture.
+
+INCIDENT 1 — a rejected step records no evidence (trait 0267.1 first
+death, session 2fa45dda). A notify command's output was rejected
+twice as required declared slot output was not supplied. The ledger
+entry carries position, slot ref, and that reason — no timestamp,
+exit code, stderr, stdout tail, or attempt number. Establishing that
+the command had exited 5 with empty stdout took an hour of
+daemon-store archaeology; the process had known all of it.
+
+INCIDENT 2 — a retried commit self-poisons invisibly (trait 0266.4,
+session c33a0896). The frame was interrupted after git commit
+succeeded but before its output was submitted. Both retries re-ran
+the commit, got nothing-to-commit with a nonzero exit, and were
+rejected for empty output. Nothing recorded the first attempt's
+success, the interruption, or the retries' stderr.
+
+INCIDENT 3 — an interruption has no cause. last-drive-outcome saying
+interrupted is the entire record: signal, lost harness child, budget,
+or pause are indistinguishable, so operator kills and machinery
+faults blur — the owner was wrongly blamed twice in one night.
+
+INCIDENT 4 — lifecycle actions vanish when they decline.
+auto_close_landed_task returns false on any refusal — failed gating
+checks, an unrunnable set, or a digest mismatch from a racing board
+edit (the actual cause) — writing nothing. Check executions persist
+only when a close succeeds.
+
+The session activity sidecar already journals model frames with
+millisecond timestamps. Command steps, retries, interruptions,
+merges, checks, and closes are invisible in it. That asymmetry is
+the gap.
+
+## Owner contract (umbrella stop condition)
+
+A dead run is analyzable from its files alone. For every command-step
+attempt, retry, interruption, merge, check execution, and close
+attempt, a durable, timestamped, append-only record states what ran,
+when it started and ended, what it produced (exit code plus bounded
+output tails, 4096 bytes each, truncation marked), and what the
+runtime decided about it (accepted, or rejected/declined with the
+concrete reason). Each of the four incidents above, replayed, is
+answerable from the journal alone — no process stdout, no daemon
+stores, no source-reading. No single child owns this condition; it
+holds only when all five children have landed and the cross-cutting
+invariants below held throughout.
+"""
+scope = """
+## Decomposition
+
+- 0277.1 — the command runner observes execution facts: true
+  byte-bounded stream tails, timing, terminating signal, kill and
+  timeout cause; the shared tail primitive every sibling reuses.
+- 0277.2 — the activity sidecar gains execution-event records, owns
+  the durable-append guarantee for them (a record downstream heard
+  of exists on disk across a crash), and every command-step attempt
+  is journaled with attempt numbering that survives process
+  boundaries (depends on .1).
+- 0277.3 — every runtime verdict is journaled and rejected-attempt
+  ledger entries gain timestamp, attempt, exit code, and tails;
+  incident 1 proof (depends on .1, .2).
+- 0277.4 — interruptions carry a typed cause and frame position in
+  journal and last-drive-outcome, with the debug checkpoint that
+  makes incident 2's window provable; incident 2 and 3 proofs
+  (depends on .2, .3).
+- 0277.5 — begin/end for every merge attempt, automatic queue and
+  manual invocations alike, check executions in every disposition
+  path, and typed close attempts with a one-line queue refusal;
+  incident 4 proofs (depends on .1, .2).
+
+## Cross-cutting invariants (binding on every child)
+
+- One journal, one ordering: all events append through the existing
+  activity writer to the per-session activity file; no second file.
+- Privacy is absolute: position-based step identity yes; resolved
+  env, credentials, prompts, or interpolated argv values never.
+- Authority is unchanged: runtime ledger acceptance, merge frames,
+  closure records, and last-drive-outcome remain authoritative;
+  journal records are forensic evidence and never drive decisions.
+- Compatibility: new ledger and record fields are optional and
+  serde-defaulted; old ledgers and old sidecars decode; paths that
+  journal nothing new behave byte-identically to today.
+- Bounds: tails capped at 4096 bytes each, truncation marked; whole
+  outputs never buffered.
+
+## Out of scope (whole family)
+
+- Fixing retry semantics for non-idempotent steps — record
+  faithfully; the policy change is its own task.
+- Rejection UX/taxonomy in the TUI (board 0271 complements this;
+  neither depends on the other).
+- ctx-notify daemon logging (its board's 0019).
+- Any TUI/GUI rendering of the journal; this family is capture only.
+"""
+validation = """
+## Acceptance shape
+
+The parent closes when all five children are done and the whole-suite
+checks below pass on the merged result. The four incident replays are
+owned by the children (incident 1 in 0277.3, incidents 2 and 3 in
+0277.4, incident 4 in 0277.5); the parent's checks re-run the three
+package suites as the umbrella gate that the family composed without
+regression.
+"""
+
+[[checks]]
+name = "core runtime suites pass"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-core"
+timeout-ms = 1200000
+expect = "test result: ok"
+
+[[checks]]
+name = "io drive and center suites pass"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-io"
+timeout-ms = 1200000
+expect = "test result: ok"
+
+[[checks]]
+name = "cli queue, checks, and proposal suites pass"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli"
+timeout-ms = 1800000
+expect = "test result: ok"

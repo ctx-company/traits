@@ -3,7 +3,7 @@ key = "0279"
 title = "Answering a parked run never spawns a second driver or kills it"
 status = "ready"
 raised = "2026-09-03"
-content = '''
+content = """
 Charter. This file carries the shared intent, the family-wide rulings, and
 the umbrella stop condition. It lands no code of its own: every execution
 plan lives in the children, each of which separates binding goals from
@@ -137,8 +137,8 @@ Behavioral proofs at the state/suite level plus detached-process proofs on
 scratch fixtures — no frozen-inventory or behavior-freezing tests. Each
 child carries its own checks; the charter's checks verify the family's
 joined suites and gates.
-'''
-scope = '''
+"""
+scope = """
 The draft's binding goals distribute as follows, binding in the children:
 goal 1 (single driver ownership, answer delivered to the existing driver,
 no `driver-lock-busy` from an answer) → `0279.2` for the waiting driver and
@@ -154,8 +154,8 @@ condition.
 Out of scope for the whole family: the annotate gate's stdin path, trait
 authoring surfaces and the ask schema, a center wire-protocol Answer
 request, and native/desktop notification UI (the `0259` family's arc).
-'''
-validation = '''
+"""
+validation = """
 ## Done when
 
 1. All five children are status done.
@@ -170,7 +170,7 @@ validation = '''
    (`0279.2`/`0279.5`'s proofs).
 5. `just test-full` is green on the family's final state, and desktop
    commands were run and reported wherever shared types were touched.
-'''
+"""
 
 [[checks]]
 name = "all five children are done"

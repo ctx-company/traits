@@ -1,8 +1,10 @@
 schema-version = "0.2"
 key = "0278.1"
 title = "A durable sessions cache seeds the first frame"
-status = "ready"
+status = "done"
 raised = "2026-09-03"
+closed = "2026-09-05"
+origin = "run run-5c04e9831556143d99e0f6ae80fd3d5da0f8862a7998642dafe6c65ddc3cc0f6 merged as d5645f8de2a7362b970660ab29138742ba534b6c"
 content = """
 This plan separates GOALS from APPROACH. The GOALS section is binding: each
 names an observable outcome, what decides it, and what it excludes. The
@@ -134,3 +136,19 @@ expect = 'test result: ok\. [1-9][0-9]* passed'
 name = "workspace gate is green"
 command = "just test"
 timeout-ms = 1800000
+
+[closure]
+mode = "merge"
+commit = "d5645f8de2a7362b970660ab29138742ba534b6c"
+
+[[closure.checks]]
+name = "dashboard lib suite is green including cache-seeded first paint"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --lib dashboard"
+outcome = "passed"
+detail = "exit 0, expect matched"
+
+[[closure.checks]]
+name = "workspace gate is green"
+command = "just test"
+outcome = "failed"
+detail = "exited 1"

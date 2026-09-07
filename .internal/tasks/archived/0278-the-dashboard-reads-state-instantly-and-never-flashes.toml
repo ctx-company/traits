@@ -3,7 +3,7 @@ key = "0278"
 title = "The dashboard reads state instantly and never flashes"
 status = "ready"
 raised = "2026-09-02"
-content = '''
+content = """
 Charter. This file carries the shared intent, the family-wide rulings, and
 the umbrella stop condition. It lands no code of its own: every execution
 plan lives in the children, each of which separates binding goals from
@@ -107,8 +107,8 @@ stale/syncing affordance — rather than re-reviewing each child.
 Behavioral proofs at the state/suite level using scratch fixtures — no
 frozen-inventory or behavior-freezing tests. Each child carries its own
 checks; the charter's checks verify the family's joined suites and gates.
-'''
-scope = '''
+"""
+scope = """
 The draft's binding goals distribute as follows, binding in the children:
 goal 1 (instant cache-seeded first paint) → 0278.1; goal 2 (no render-thread
 reads, responsive TUI) → 0278.2 under the charter's coverage ruling; goal 3
@@ -123,8 +123,8 @@ greater-than-1MiB `get` silent-close (their own concerns); visual redesign
 beyond 0278.3's explicit pending marker; a thinner list-row wire type or a
 worker-to-renderer delta protocol (lean line); desktop-side caching or
 reconciliation changes.
-'''
-validation = '''
+"""
+validation = """
 ## Done when
 
 1. All four children are status done.
@@ -143,7 +143,8 @@ validation = '''
    proofs).
 6. `just test-full` is green on the family's final state, and desktop
    commands were run and reported wherever shared types were touched.
-'''
+"""
+
 [[checks]]
 name = "all four children are done"
 command = 'for f in .internal/tasks/0278.1-*.toml .internal/tasks/0278.2-*.toml .internal/tasks/0278.3-*.toml .internal/tasks/0278.4-*.toml; do grep -l "^status = \"done\"" $f || exit 1; done'

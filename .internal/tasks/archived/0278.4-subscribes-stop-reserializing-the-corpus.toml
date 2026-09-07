@@ -1,8 +1,10 @@
 schema-version = "0.2"
 key = "0278.4"
 title = "Subscribes stop re-serializing the whole corpus"
-status = "ready"
+status = "done"
 raised = "2026-09-03"
+closed = "2026-09-06"
+origin = "run run-6ec6f1dac0e2111afd4e7c10f93123848d54777409a9602be6edf75613b0c80f merged as 04e50f21d55b04172fadbfb143e57382bf7e8703"
 content = """
 This plan separates GOALS from APPROACH. The GOALS section is binding: each
 names an observable outcome, what decides it, and what it excludes. The
@@ -132,3 +134,19 @@ expect = 'test result: ok\. [1-9][0-9]* passed'
 name = "workspace gate is green"
 command = "just test"
 timeout-ms = 1800000
+
+[closure]
+mode = "merge"
+commit = "04e50f21d55b04172fadbfb143e57382bf7e8703"
+
+[[closure.checks]]
+name = "center suite is green including serialization-count proof"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-io center"
+outcome = "passed"
+detail = "exit 0, expect matched"
+
+[[closure.checks]]
+name = "workspace gate is green"
+command = "just test"
+outcome = "failed"
+detail = "exited 1"

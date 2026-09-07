@@ -1,0 +1,198 @@
+schema-version = "0.2"
+key = "0277.5"
+title = "Journal the merge/check/close lifecycle: every merge's begin/end, check executions, typed close attempts"
+status = "done"
+raised = "2026-09-03"
+closed = "2026-09-04"
+origin = "run run-be6dd0ae25717cfd38c52384cece5c224020bce976b04dd1a55c1bb70f4ec44c merged as 4a1228f6b9d15603eeb1884b226b2c7a8515ce12"
+content = """
+Fifth child of 0277; carries the incident 4 regression proofs. Today
+lifecycle actions vanish when they decline: auto_close_landed_task
+returns a bare bool that swallows failed gating checks, unrunnable
+check sets, and the digest-mismatch StaleWrite that actually caused
+the 0267.1 close loss — a declined close is indistinguishable from a
+close nobody attempted, and the queue prints only landed. Check
+executions are persisted only inside a successful close's closure
+block; execute_one discards output and measures no duration. Merge
+lock-unavailable and lock-timeout return before any merge frame is
+appended, so merge frames alone cannot prove an attempted merge began
+and ended. MergeLive events go only to a presentation sink.
+
+This child journals begin/end for every merge attempt — automatic
+queue merges and manual merges alike — every declared task-check
+execution in every disposition path, and every close attempt with its
+concrete disposition — appending to the same per-session activity
+file — and surfaces a declined close as one line on the queue's
+stdout.
+"""
+scope = """
+This plan separates GOALS from APPROACH. Goals are binding: each
+Done-when states an observable outcome and the existing command that
+decides it. The approach is the architect's suggested route; the run
+may deviate from any of it whenever a goal requires it and reports
+the deviation in its work summary — a deviation is not a violation.
+
+## Goals (binding)
+
+1. Merge begin and end: every merge attempted through the
+   resolved-session merge path — automatic merges from the queue and
+   manual merge invocations equally — journals exactly one begin
+   event and exactly one end event carrying the result, on every
+   exit path — including lock-unavailable, lock-timeout, early
+   Ok-report exits, and propagated errors. Merge frames remain the
+   merge authority; journal events are evidence only.
+2. Check executions: each declared task check journals its execution
+   with name, explicit millisecond start and end facts, outcome,
+   exit code, and bounded stdout and stderr tails taken from the
+   shared runner's true stream-tail observations (4096 bytes each,
+   truncation marked), in every disposition path — not only
+   successful closes. A started record is written before the check
+   runs, so a process dying mid-check leaves evidence. CheckRecord
+   gains backward-compatible optional execution facts
+   (serde-defaulted, omitted when absent); no second verdict shape
+   is invented.
+3. Typed close attempts: auto_close_landed_task returns a typed
+   close-attempt result instead of bool. Every close attempt from the
+   queue is journaled with its disposition and, when declined, the
+   concrete refusal: failed check (named), unrunnable set (reason),
+   digest mismatch (the StaleWrite currently discarded), or policy
+   (Confirm never auto-closes). A declined close prints one line on
+   the queue's stdout. Checks execute exactly once — journal and
+   stdout consume the same evaluate_task_close result.
+4. Journal routing: merge/check/close events append to the exact
+   per-session activity file the drive journaled to — the same
+   sidecar, resolved from the session's exact ledger path (automatic
+   merges receive it through complete_after_drive; manual merges
+   resolve it before mutating Git), never guessed from branch or
+   merge data. No second journal file is created.
+5. Incident 4 is regression-proven twice: (a) a close declined by
+   digest mismatch — a declared check mutates the board document
+   between the queue's read and the close write, reaching the real
+   StaleWrite guard — and (b) a close declined by a failed gating
+   check on a Checked-policy task; each asserts the journal names the
+   disposition and refusal and the queue printed the one-line
+   refusal.
+6. Byte-identity elsewhere: close policy, merge policy, check
+   semantics, and successful-path behavior are unchanged; runs that
+   trigger no lifecycle events produce unchanged output and files.
+
+Done-when is decided by: CARGO_TARGET_DIR=target cargo test -p
+ctx-traits-cli, -p ctx-traits-io (sidecar plumbing), and just
+desktop-test (the lifecycle records are new outer ActivityRecord
+variants; the desktop crate's exhaustive match is outside the root
+workspace).
+
+## Approach (suggested)
+
+Merge already receives the resolved ledger path — automatic merge via
+complete_after_drive (modules/cli/src/app/run.rs:1918-2016), manual
+merge resolving it at merge.rs:516-549 — so open a sidecar writer on
+that path; a single wrapper around the resolved-session merge body
+or an equivalent finalization boundary both satisfy goal 1 — what
+does not is adding writes beside existing terminal frames, which
+misses the lock and error exits (merge.rs:662-700). For checks, add
+an observer around execute_one in
+modules/cli/src/app/task_checks.rs:79-192, exposing timing and exit
+facts and consuming the true stream-tail observations the shared
+runner (command::run_with_env, per 0277.1) already returns. Never
+re-derive a tail by clipping captured stdout/stderr: whenever check
+output exceeds the 65536-byte capture limit, the captured prefix's
+final bytes are not the stream's final bytes, which is exactly the
+error 0277.1 exists to eliminate. Extend
+CheckRecord in modules/core/src/task/mod.rs:48-131 with the optional
+facts. For close, return a typed result from auto_close_landed_task
+(modules/cli/src/app/task_queue.rs:71-108) that preserves the
+disposition from close_disposition and the concrete WriteError from
+write_task_close_core (task_proposals.rs:543-581), and print the
+refusal line where queue orchestration currently renders landed
+(modules/cli/src/app/run.rs:874-956). Thread the session path to the
+queue close through CompletionOutcome or an equivalent. Use the
+0277.2 record kinds; add lifecycle variants beside them, keeping
+story/desktop matches ignoring them. Scratch-board fixtures per the
+support crate; the digest-race fixture edits the board file from
+within a declared check.
+
+## Out of scope
+
+- Dashboard/manual close journaling — close capture is rooted in the
+  queue path (merge capture is not: both merge entry paths are goal
+  1); a global lifecycle journal is scope creep.
+- Merge-frame schema changes, merge policy, or gate semantics.
+- Check retry or policy changes; rendering of any journal record.
+- ctx-notify daemon logging (its board's 0019).
+"""
+validation = """
+## Watch
+
+The merge wrapper is the correctness seam: many early returns mean a
+missed exit path silently breaks the begin/end guarantee — prefer one
+finalization boundary over scattered writes. Do not run checks twice
+to get evidence: evaluate_task_close already returns everything;
+calling checks again would change observable behavior and timing.
+
+## Done when
+
+1. Incident 4 proofs (goal 5, both variants) pass. Decided by the
+   cli suite.
+2. Both merge entry paths are proven: an automatic queue merge and a
+   manual merge invocation each journal exactly one begin and one
+   end record on the session's activity file, and a merge blocked on
+   the lock journals begin and end with the lock result. Decided by
+   the cli suite.
+3. Check-execution records appear for passing, failing, and
+   unrunnable checks with start/end times and true stream tails —
+   including a check whose output exceeds both the 65536-byte check
+   capture limit and the 4096-byte tail cap, whose journaled tail is
+   the stream's final bytes; unit coverage beside task_checks.rs and
+   task_queue.rs passes. Decided by the cli suite.
+4. The io and cli suites stay green, and the desktop crate compiles
+   ignoring the lifecycle record variants. Decided by the declared
+   package checks plus just desktop-test.
+"""
+
+[relations]
+depends-on = [
+    "0277.1",
+    "0277.2",
+]
+parent = "0277"
+
+[[checks]]
+name = "io suite passes with lifecycle record plumbing"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-io"
+timeout-ms = 1200000
+expect = "test result: ok"
+
+[[checks]]
+name = "cli suite passes with incident 4 proofs"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli"
+timeout-ms = 1800000
+expect = "test result: ok"
+
+[[checks]]
+name = "desktop compiles ignoring lifecycle record variants"
+command = "just desktop-test"
+timeout-ms = 3600000
+expect = "test result: ok"
+
+[closure]
+mode = "merge"
+commit = "4a1228f6b9d15603eeb1884b226b2c7a8515ce12"
+
+[[closure.checks]]
+name = "io suite passes with lifecycle record plumbing"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-io"
+outcome = "passed"
+detail = "exit 0, expect matched"
+
+[[closure.checks]]
+name = "cli suite passes with incident 4 proofs"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli"
+outcome = "failed"
+detail = "exited 101"
+
+[[closure.checks]]
+name = "desktop compiles ignoring lifecycle record variants"
+command = "just desktop-test"
+outcome = "passed"
+detail = "exit 0, expect matched"

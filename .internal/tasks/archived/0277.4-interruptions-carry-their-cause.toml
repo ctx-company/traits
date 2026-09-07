@@ -1,0 +1,192 @@
+schema-version = "0.2"
+key = "0277.4"
+title = "Interruptions carry their cause in the journal and last-drive-outcome"
+status = "done"
+raised = "2026-09-03"
+closed = "2026-09-04"
+origin = "run run-5a73e993f314982805f9ad365bb2050f751639c68f7a50a82b367a143eef2004 merged as bd47e6a81388cd0708098265712508b9782c674e"
+content = """
+Fourth child of 0277; carries the incident 2 and incident 3
+regression proofs. Today last-drive-outcome.outcome = interrupted is
+the entire record of an interruption: DriveOutcome has no cause or
+frame position, interrupt.rs collapses SIGINT and control-socket
+interrupts into one boolean, cooperative_stop_status assumes graceful
+SIGINT in its detail text, center orphan repair writes a bare
+Interrupted indistinguishable from an operator stop, and a TUI-killed
+command surfaces as a generic failure because RunOutput never sees
+run_kill::was_killed. That is why the owner was wrongly blamed twice
+in one night. Separately, the window between a command's side effect
+and its submission (incident 2: git commit succeeded, then the frame
+was interrupted before submitting) has no deterministic observation
+point, so the poisoned-retry sequence cannot be proven or diagnosed.
+
+This child types the interruption cause end to end, records the frame
+position the run stood at, and adds the debug-only checkpoint that
+makes incident 2's window provable.
+"""
+scope = """
+This plan separates GOALS from APPROACH. Goals are binding: each
+Done-when states an observable outcome and the existing command that
+decides it. The approach is the architect's suggested route; the run
+may deviate from any of it whenever a goal requires it and reports
+the deviation in its work summary — a deviation is not a violation.
+
+## Goals (binding)
+
+1. When a drive ends interrupted (or paused), both a journal event
+   and last-drive-outcome record a typed cause from the enumerable
+   set: operator signal (which signal), control-socket interrupt,
+   pause requested, budget exhausted (which budget), owner park,
+   harness child exited (with its exit status), or TUI kill. The
+   cause source is captured where it is first known (signal handler
+   registration, control socket, budget check, child wait), not
+   guessed at drive end.
+2. Both records also carry the frame position the run stood at:
+   current indexes, item id, and active path copied as typed evidence
+   from the loaded session, not reconstructed from trait source.
+3. A cooperative interruption that lands between a command's process
+   completing and its submission is journaled as exactly that window
+   — distinguishable from a between-frames stop.
+4. Center orphan repair records a distinct orphan-repaired cause
+   instead of a bare Interrupted, so a crashed or hard-killed driver
+   (SIGTERM/SIGHUP exits through _exit and cannot journal) is never
+   confused with a cooperative operator stop.
+5. New DriveOutcome fields are optional, serde-defaulted, and omitted
+   when absent; all existing struct-literal construction sites across
+   core, io, cli, and desktop compile; old session files decode.
+6. A debug-only checkpoint exists between command execution returning
+   and submission, following the established drive.rs checkpoint
+   pattern: registered in modules/io/src/env_reference.rs, compiled
+   out of release builds with release-absence coverage.
+7. Incident 2 is regression-proven: a side-effecting fixture command
+   that succeeds once (marker file) and exits 5 with empty output on
+   re-execution, interrupted at the goal-6 checkpoint, then retried —
+   the journal alone shows attempt 1's success, the interruption in
+   the window, and each retry's nonzero exit as distinguishable
+   records.
+8. Incident 3 is regression-proven: an interrupt delivered mid-frame
+   yields a last-drive-outcome and journal naming cause and position.
+   Assertions read the activity JSONL and the session file, not
+   transient center events or process output.
+
+Done-when is decided by: CARGO_TARGET_DIR=target cargo test -p
+ctx-traits-core, -p ctx-traits-io, -p ctx-traits-cli, and just
+desktop-test (goal 5's desktop struct-literal sites and the new
+interruption ActivityRecord variant live in the desktop crate,
+which is outside the root workspace).
+
+## Approach (suggested)
+
+Extend interrupt.rs (modules/cli/src/app/interrupt.rs:17-25,184-243)
+to store a typed cause alongside the existing booleans — SIGINT
+handler, control-socket Interrupt, and pause each record their own.
+Map budget/credit/park stops from their existing distinct statuses
+(drive.rs:1668-1707 and the terminal-marker assembly at
+drive.rs:1360-1575) into the same cause enum rather than inventing
+parallel state. Surface run_kill::was_killed through the 0277.1
+runner observation for the TUI-kill cause. Add the cause and position
+to DriveOutcome (modules/core/src/procedure/session.rs:1174-1414) and
+to record_interrupted_outcome_in_session for orphan repair
+(modules/io/src/run_session.rs:656-685; center.rs:3394-3497). Emit
+the journal event through the 0277.2 writer at the drive's
+observation boundary, where the phase (mid-frame, post-execution
+pre-submission, between frames) is still known. Model the checkpoint
+on drive.rs:8090-8162. For proofs, reuse the controlled blocking
+harness and center control flow patterns from proof_center.rs:
+2833-2913 and the retry fixtures in proof_drive_retries.rs; never
+timing sleeps.
+
+## Out of scope
+
+- Changing retry semantics for non-idempotent steps (recorded
+  faithfully here; the policy change is its own task).
+- Async-signal-unsafe work inside SIGTERM/SIGHUP handlers; the
+  hard-kill path is covered via orphan repair (goal 4), not via
+  journaling from the handler.
+- Merge/check/close journaling (0277.5).
+- Settling or repairing crashed sessions beyond recording cause
+  (board 0270).
+"""
+validation = """
+## Watch
+
+The cause must be captured at its source: deriving it at drive end
+reintroduces exactly the ambiguity being removed. DriveOutcome
+touches many fixture literals — keep new fields optional and
+defaulted or the diff balloons. The incident 2 proof is the subtle
+one: the journal must show the attempt's success AND the failure to
+submit — two events, not one — and only the debug checkpoint makes
+that window deterministic.
+
+## Done when
+
+1. Incident 2 proof (goal 7) passes. Decided by the cli suite.
+2. Incident 3 proof (goal 8) passes. Decided by the cli suite.
+3. Orphan repair writes the distinct cause; existing center proofs
+   stay green. Decided by the io and cli suites.
+4. Release-absence coverage for the checkpoint passes; core suite
+   proves DriveOutcome compatibility. Decided by the core, io, and
+   cli suites.
+5. Desktop fixture literals compile with the new DriveOutcome fields
+   and the desktop match ignores the new record variant. Decided by
+   just desktop-test.
+"""
+
+[relations]
+depends-on = [
+    "0277.2",
+    "0277.3",
+]
+parent = "0277"
+
+[[checks]]
+name = "core suite passes with drive-outcome compatibility"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-core"
+timeout-ms = 1200000
+expect = "test result: ok"
+
+[[checks]]
+name = "io suite passes with orphan-repair cause tests"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-io"
+timeout-ms = 1200000
+expect = "test result: ok"
+
+[[checks]]
+name = "cli suite passes with incident 2 and 3 proofs"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli"
+timeout-ms = 1800000
+expect = "test result: ok"
+
+[[checks]]
+name = "desktop compiles with drive-outcome and record changes"
+command = "just desktop-test"
+timeout-ms = 3600000
+expect = "test result: ok"
+
+[closure]
+mode = "merge"
+commit = "bd47e6a81388cd0708098265712508b9782c674e"
+
+[[closure.checks]]
+name = "core suite passes with drive-outcome compatibility"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-core"
+outcome = "passed"
+detail = "exit 0, expect matched"
+
+[[closure.checks]]
+name = "io suite passes with orphan-repair cause tests"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-io"
+outcome = "passed"
+detail = "exit 0, expect matched"
+
+[[closure.checks]]
+name = "cli suite passes with incident 2 and 3 proofs"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli"
+outcome = "failed"
+detail = "exited 101"
+
+[[closure.checks]]
+name = "desktop compiles with drive-outcome and record changes"
+command = "just desktop-test"
+outcome = "passed"
+detail = "exit 0, expect matched"

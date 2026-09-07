@@ -1,8 +1,10 @@
 schema-version = "0.2"
 key = "0279.5"
 title = "A park presents as parked everywhere"
-status = "ready"
+status = "done"
 raised = "2026-09-03"
+closed = "2026-09-06"
+origin = "run run-3587772bd2f2526037212a770de7a4486236831f760cc4543cd95ec376c10d77 merged as efb7cb761af817d76355250273b44ba8375f0ca0"
 content = """
 This plan separates GOALS from APPROACH. The GOALS section is binding: each
 names an observable outcome, what decides it, and what it excludes. The
@@ -163,3 +165,25 @@ expect = 'test result: ok\. [1-9][0-9]* passed'
 name = "workspace gate is green"
 command = "just test"
 timeout-ms = 1800000
+
+[closure]
+mode = "merge"
+commit = "efb7cb761af817d76355250273b44ba8375f0ca0"
+
+[[closure.checks]]
+name = "dashboard lib suite is green including awaiting-owner presentation"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --lib dashboard"
+outcome = "passed"
+detail = "exit 0, expect matched"
+
+[[closure.checks]]
+name = "task queue suite is green including the ask-park outcome"
+command = "CARGO_TARGET_DIR=target cargo test -p ctx-traits-cli --lib task_queue_drive"
+outcome = "passed"
+detail = "exit 0, expect matched"
+
+[[closure.checks]]
+name = "workspace gate is green"
+command = "just test"
+outcome = "failed"
+detail = "exited 1"
