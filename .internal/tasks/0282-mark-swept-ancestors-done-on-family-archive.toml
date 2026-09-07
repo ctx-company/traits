@@ -1,0 +1,50 @@
+schema-version = "0.2"
+key = "0282"
+title = "Mark swept ancestors done on family archive"
+status = "draft"
+raised = "2026-09-07"
+content = """
+When the last child of a task family closes, `FilesTaskBoard::update` (modules/io/src/task_files.rs) runs `sweep_closed_ancestors` (~line 743), which walks up the parent chain and archives every finished ancestor via `archive_in_place` (~line 786). That move deliberately keeps the file content untouched — so each archived ancestor document retains its stale stored `status` (e.g. `ready`, or unset) and gets no `closed` date, even though its whole family is done. The direct-close path in `update()` (~lines 663–679) stamps `status` and `closed = today_date_utc()` on close; the sweep path does not, and the gap is visible in the raw archived TOML and in surfaces that render stored status (`stored_status_text`, modules/cli/src/app/tasks.rs ~line 576, shows "unset"/"ready" for a fully-done archived parent).
+
+This task closes that gap: every ancestor document that the sweep moves into `archived/` — the immediate parent and any grandparents the upward walk archives in the same sweep — must end up with stored `status = "done"` and a `closed` date in its own document, matching the direct-close path's stamping. The parent-with-children branch of `graph::derived_status` (modules/core/src/task/graph.rs, ~line 171) ignores stored status while children exist, so stamping on archive does not change derivation; the stored document is being corrected for readers of the document itself.
+
+The fix belongs at the provider layer: every write path (CLI `tasks` commands, dashboard, auto-close) funnels through `FilesTaskBoard::update`, so no CLI/dashboard/desktop/toolkit surface changes are required — they all read the provider's output.
+"""
+scope = """
+## Decisions
+- In scope: the archive-on-close ancestor sweep path in modules/io/src/task_files.rs (`sweep_closed_ancestors` / `archive_in_place`), any core-type helper it needs (modules/core/src/task/), and test extensions in the same module.
+- The stamping applies to EVERY ancestor the sweep archives in one pass, not just the immediate parent — the upward walk can archive grandparents when closing the last child finishes them.
+- Every ancestor the sweep archives persists `status = "done"` and a `closed` date — including when the all-closed family contains cancelled children (`derived_status` already folds that case to `Done`); the sweep never writes `cancelled` onto an ancestor.
+- The sweep does NOT synthesize a `Closure` record: it has no check or merge provenance (the direct path only writes one when the caller passes `set_closure`), so the ancestor's `closure` field is left unchanged.
+- Out of scope: any change to `derived_status` semantics in modules/core/src/task/graph.rs; a reopen-cascade for ancestors (reopening today clears `closed`/`closure` on the one document only, and adding a cascade is scope creep); CLI, dashboard, toolkit, or desktop surface changes (desktop/ is a separate cargo project outside the workspace and only consumes summaries).
+- Doc comments on `sweep_closed_ancestors`/`archive_in_place` currently encode the "content untouched" contract; they are the stated design and must be updated to match the new stamping behavior.
+"""
+validation = """
+## Watch
+- `[effects] archive-on-close = false` must keep suppressing the whole ancestor sweep — `a_parent_is_not_archived_while_archive_on_close_is_false` (task_files.rs ~line 2004) pins this.
+- A closed LEAF keeps its stored closed status unconditionally; do not alter `derived_status` semantics (regression note in graph.rs from 2026-08-24: an archived-but-ready file once cascaded `blocked` through dozens of done tasks).
+- Preserve the sweep's error posture exactly: per-ancestor failures recorded as `EffectRecord { EffectKind::ArchivePlacement, EffectOutcome::Failed }`, never a rollback of the already-applied child write; the sweep re-reads the board so the child's close is visible; it stops at the first ancestor with open work and cycle-guards with a `seen` set.
+- Keep the effect vocabulary stable — `ArchivePlacement` applied/failed records are consumed by CLI output (modules/cli/src/app/tasks.rs ~line 571) and dashboard (~line 7937).
+- `TaskDocument` serde is `deny_unknown_fields`; write documents via `ctx_traits_core::task::serialize` (as `write_document` does). `archive_in_place` currently re-parses the file text rather than using the loaded snapshot — whatever it writes must keep round-tripping content untouched apart from the fields deliberately stamped.
+- Test doctrine: behavioral proofs on scratch fixtures only — tempdir + `write_task` as the surrounding task_files tests do; no tests depending on committed repo content, no behavior-freezing goldens.
+- Gates that outlive 120s need per-check timeout-ms; if a gate flakes in a shared-cache worktree, isolate with `CARGO_TARGET_DIR=target` before trusting the failure.
+
+## Done when
+Closing the last child of a fully-done family leaves every ancestor document the sweep moved into `archived/` with stored `status = "done"` and a `closed` date (consistent with the direct-close path), and `closure` unchanged — proven by tempdir behavioral tests in modules/io/src/task_files.rs that assert stored `status = "done"` and the `closed` date on BOTH the immediate parent and a grandparent archived in the same sweep, including a family whose closed descendants include a cancelled task (extending `closing_the_last_child_archives_the_parent_too`, which today asserts placement only), with `a_parent_is_not_archived_while_archive_on_close_is_false` still green and the `just test-full` landing gate passing.
+"""
+
+[[checks]]
+name = "task_files provider unit tests pass, including sweep stamping coverage"
+command = "cargo test -p ctx-traits-io --lib"
+timeout-ms = 900000
+
+[[checks]]
+name = "archive-on-close=false still suppresses the ancestor sweep"
+command = "cargo test -p ctx-traits-io --lib a_parent_is_not_archived_while_archive_on_close_is_false"
+timeout-ms = 900000
+expect = "1 passed"
+
+[[checks]]
+name = "full workspace landing gate"
+command = "just test-full"
+timeout-ms = 3600000
