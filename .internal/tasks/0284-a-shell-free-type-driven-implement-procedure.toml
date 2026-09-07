@@ -1,0 +1,48 @@
+schema-version = "0.2"
+key = "0284"
+title = "A shell-free, type-driven implement procedure"
+status = "draft"
+raised = "2026-09-07"
+content = """
+DRAFT — parent for the two follow-ons the step-walk (0283) left behind. To be
+run through architect for decomposition.
+
+0283 replaced the implement loop's inner apparatus with a walk over a typed
+step list and removed the worst of the procedure's shell (the proof `sh -c`,
+the brief and proof-command projections, the changed-files capture). Two things
+still keep the procedure from being fully shell-free and type-driven, and both
+are general toolkit/core capabilities that other trait families will want once
+proven here:
+
+- The procedure still stitches shell for its own mechanics — the `ctx-notify`
+  command chain and the `git` commit steps. These should be typed runtime
+  EFFECTS the trait declares and core executes.
+- The for-each can only walk a top-level list slot, so the reviewer had to
+  write a standalone `steps` slot instead of one cohesive `verdict` object.
+  For-each over a field ref would let a seat emit one typed object and the loop
+  walk its list field.
+
+Together these finish the thesis: the trait declares intent as typed
+artifacts, the runtime does the wiring, and no shell survives in the
+procedure's own mechanics. Scope each generically in core/cdk, adopt in
+implement, and do NOT spread to other families until proven here.
+"""
+scope = """
+## Children (drafts)
+
+- 0284.1 — notify and commit become typed runtime effects.
+- 0284.2 — for-each over a field ref (collapse `steps` into one verdict object).
+
+Both were drafted as 0283.1 / 0283.2 while 0283 was open; re-homed here now
+that 0283 is done. Order is architect's to decide; 0284.2 (the field-ref walk)
+may want to land before the reviewer's output is reshaped.
+"""
+validation = """
+## Done when
+
+- The implement generated canonicals carry no `ctx-notify` and no `git` argv in
+  the procedure's own mechanics, and the reviewer emits one typed verdict object
+  the walk runs over — with the trait building, checking, and running as before.
+"""
+
+[relations]
