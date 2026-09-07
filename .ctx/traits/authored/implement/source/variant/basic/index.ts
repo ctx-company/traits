@@ -2,39 +2,28 @@ import * as cdk from "@ctx-traits/cdk";
 import * as agents from "@ctx-traits/agents";
 import * as shared from "#trait/shared/index.ts";
 
-// The stage loop (0281.7). The contract is fixed before work: the plan's
-// stages carry their goal, proof and commit flag, the owner accepts them at
-// the plan gate, and a baseline review opens the ledger — every step with
-// a frozen done-when — and writes the first brief. Then, per stage: the
-// worker is dispatched again and again on the brief until it claims the
-// stage complete and the stage's proof passes, or it reports itself
-// blocked, or the stage's time is spent; only then does the reviewer run,
-// grading the claim against the frozen text, appending discoveries, and
-// moving the brief. A stage the plan marks `commit` is committed the
-// moment it flips to done, and the task branch follows it.
-//
-// How long one stage may be worked before a review is forced, measured on
-// the loop's own clock (active-drive seconds since its first dispatch).
-// Each dispatch is bounded by the seat's frame budget on top of this.
-const STAGE_SECONDS = 4 * 60 * 60;
-
+// The step-walk (0283). The reviewer owns a typed list of open steps; the
+// runtime walks it with for-each, working each step in an inner loop until the
+// worker returns done or blocked (not-done keeps the same step). When the pass
+// exhausts, the reviewer validates the tree with its own tools and rewrites the
+// list — dropping done steps, resolving blocked ones with a typed decision,
+// appending new findings, emptying it when the task is done. No proof, no
+// stage-claim, no brief projection: the worker sees the one bound step.
 export default function () {
   cdk.defineVariant("Basic", {
-    description: "Reviewed implementation: plan, then stage by stage — work until claimed, prove, review, commit.",
+    description: "Reviewed implementation: plan, then walk the steps — work each until done or blocked, review, repeat until the list is empty.",
     metadata: { tag: shared.metadata.tag },
   });
 
   shared.step.notify.begin("Open the owner notification");
-
   shared.step.notify.update("Notify: session base", "Capture the session base");
   shared.step.diff.baseline("Capture the session base");
 
+  // The plan gate: the owner sees the plan before any work; it is redrafted
+  // with corrections until accepted (plan-gate=off accepts on the first pass).
   shared.step.notify.update("Notify: plan drafted", "Draft the implementation plan");
-  // 0281.3: the owner sees the plan before any implement round. The plan
-  // is redrafted with the owner's corrections until accepted; with
-  // plan-gate=off the gate accepts on the first pass.
   cdk.flow.loop("Plan approval", (loop) => {
-    shared.step.draft.compose("Draft the implementation plan");
+    shared.step.plan.compose("Draft the implementation plan");
     shared.step.annotate.digestPlan("Digest the plan for annotation");
     shared.step.annotate.carryPlanSurface("Carry the plan surface");
     shared.step.annotate.planApprovalGate("Annotate the plan");
@@ -42,46 +31,35 @@ export default function () {
     loop.untilAll([cdk.condition.equals(shared.data.planAnswer, "accepted")]);
   });
 
-  // The baseline: the ledger and the first brief exist before the first
-  // dispatch, so every claim is graded against text that preceded it.
-  shared.step.notify.update("Notify: baseline review", "Review the tree before any work");
-  shared.step.review.baseline("Review the tree before any work");
+  // The baseline: the reviewer opens the step list before any work, so the
+  // first dispatch has a real step and every step is validated against text
+  // that preceded it.
+  shared.step.notify.update("Notify: baseline review", "Open the step list");
+  shared.step.review.baseline("Open the step list");
 
-  // Read once, on the baseline verdict: a tree that already meets the plan
-  // skips the loop. Inside the loop the body is unconditional — a guard on
-  // the loop body that read the previous iteration's verdict would see a
-  // stale value (a loop-body slot from an earlier iteration never satisfies
-  // this loop's guards) and skip every iteration after the first, spinning
-  // the loop to its control budget. The `until` at the end of an iteration
-  // reads the verdict that iteration's review wrote, so it stays fresh.
-  cdk.flow.when("Work remains", cdk.condition.equals(shared.data.verdict1.status, "revise"), () => {
-    cdk.flow.loop("Stage loop", (stage) => {
-      shared.step.carry.carryBrief("Carry the brief");
-      shared.step.notify.update("Notify: working the stage", "Working the stage");
+  // The review loop runs only if there is work: each pass walks the open steps,
+  // then the reviewer validates and rewrites the list. An empty list — the
+  // reviewer's confirmation that the task is done — is the only exit.
+  cdk.flow.when("Work remains", cdk.condition.notEmpty(shared.data.steps), () => {
+    cdk.flow.loop("Review loop", (round) => {
 
-      // The work loop: dispatches chain on the worker's own report until
-      // the claim holds and the proof passed, the worker is blocked, or the
-      // stage's time is spent. A dispatch that does not claim runs no
-      // proof and reaches no reviewer.
-      cdk.flow.loop("Work the stage", (work) => {
-        shared.step.work.implement("Implement the stage");
-        cdk.flow.when("Claimed", cdk.condition.fieldEquals(shared.data.report, "claim", "complete"), () => {
-          shared.step.proof.run("Prove the claim");
+      // The step-walk: one for-each pass over the reviewer's open steps. Each
+      // step is worked in an inner loop until the worker returns done or
+      // blocked; not-done continues the SAME step. blocked advances like done,
+      // so the pass always finishes to exhaustion before the reviewer runs.
+      shared.step.notify.update("Notify: working the steps", "Working the steps");
+      shared.data.steps.forEach("Work the steps", (step, walk) => {
+        cdk.flow.loop("Work the step", (work) => {
+          shared.step.work.implement("Implement the step", step);
+          work.untilAll([
+            cdk.condition.not(cdk.condition.fieldEquals(shared.data.report, "status", "not-done")),
+          ]);
         });
-        work.untilAll([
-          cdk.condition.any([
-            cdk.condition.all([
-              cdk.condition.fieldEquals(shared.data.report, "claim", "complete"),
-              cdk.condition.equals(shared.data.proofResult, "pass"),
-            ]),
-            cdk.condition.not(cdk.condition.fieldEquals(shared.data.report, "blocked", "")),
-            cdk.condition.loopElapsedAtLeast(STAGE_SECONDS),
-          ]),
-        ]);
       });
 
-      shared.step.diff.capture("Capture the changed files");
-      shared.step.review.primarySummoning("Review the claim");
+      // The reviewer is the only validator: it checks the tree with its own
+      // tools and rewrites the open-step list for the next pass.
+      shared.step.review.validate("Review the stage");
       shared.step.notify.reviewUpdate("Notify: review verdict");
       shared.step.notify.update("Notify: awaiting annotations", "awaiting owner annotations");
       shared.step.annotate.carrySurface("Carry the annotation surface");
@@ -89,8 +67,8 @@ export default function () {
       shared.step.annotate.recordRuling("Record the owner ruling");
       shared.step.notify.gateResult("Notify: owner ruling");
 
-      // 0281.1: an annotated verdict is applied by the reviewer before the
-      // next work loop — the worker only ever sees the applied verdict.
+      // An annotated list is applied by the reviewer before the next pass, so
+      // the worker only ever walks the applied list.
       cdk.flow.when(
         "Owner annotated",
         cdk.condition.not(cdk.condition.equals(shared.data.gateAnswer, "accepted")),
@@ -99,9 +77,9 @@ export default function () {
         },
       );
 
+      // A step only the owner can settle parks the run (owner-ruling on); the
+      // answer becomes the step's resolution and the loop continues.
       cdk.flow.when("Owner ruling", cdk.condition.signal(agents.needsOwnerSignal), () => {
-        // owner-ruling=off (unattended nights): the summons branch is skipped —
-        // the escalation stays in the verdict for morning review, nothing parks.
         cdk.flow.when(
           "Owner reachable",
           cdk.condition.not(cdk.condition.equals(shared.data.ownerRuling, "off")),
@@ -112,34 +90,22 @@ export default function () {
         );
       });
 
-      // A stage the plan marks `commit` lands the moment it flips to done.
-      cdk.flow.when(
-        "Stage committed",
-        cdk.condition.fieldEquals(shared.data.verdict1, "closed-stage.commit", true),
-        () => {
-          shared.step.git.carryClosedStage("Carry the closed stage");
-          shared.step.notify.update("Notify: stage committed", "Commit the stage");
-          shared.step.git.stageCommitMessage("Write the stage commit message");
-          shared.step.git.commitStage("Stage all changes");
-          shared.step.git.commitSubmit("Commit the stage");
-          shared.step.git.taskBranch("Move the task branch");
-        },
-      );
+      // Commit progress whenever the tree is dirty (0283 v1 — per-stage-semantic
+      // commit lands with the commit effect in 0283.1).
+      shared.step.git.status("Check working tree status");
+      cdk.flow.when("Commit progress", cdk.condition.notEmpty(shared.step.git.status.output), () => {
+        shared.step.notify.update("Notify: committed", "Commit the progress");
+        shared.step.git.commitMessage("Write the commit message");
+        shared.step.git.commitStage("Stage all changes");
+        shared.step.git.commitSubmit("Commit the progress");
+        shared.step.git.taskBranch("Move the task branch");
+      });
 
-      // The exit reads the APPLIED verdict (0281.1): an approved verdict the
-      // owner annotated with new work comes back as revise and the loop
-      // continues; a revise verdict the owner overruled to approved ends it.
-      stage.untilAll([cdk.condition.equals(shared.data.verdict1.status, "approved")]);
+      // The exit reads the applied list: empty means the reviewer confirmed the
+      // task done; anything open means another pass.
+      round.untilAll([cdk.condition.not(cdk.condition.notEmpty(shared.data.steps))]);
     });
   });
 
-  shared.step.git.status("Check working tree status");
-  cdk.flow.when("Maybe Commit", cdk.condition.notEmpty(shared.step.git.status.output), () => {
-    shared.step.notify.update("Notify: committed", "Commit the work");
-    shared.step.git.commitMessage("Write the commit message");
-    shared.step.git.commitStage("Stage all changes");
-    shared.step.git.commitSubmit("Commit the work");
-    shared.step.git.taskBranch("Move the task branch");
-  });
   shared.step.notify.finish("Close the owner notification");
 }

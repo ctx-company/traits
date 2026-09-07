@@ -1,0 +1,108 @@
+schema-version = "0.2"
+key = "0283"
+title = "The step-walk: the runtime walks a typed step list, the worker returns per-step, the reviewer is the only validator"
+status = "done"
+raised = "2026-09-07"
+content = """
+This plan separates GOALS from APPROACH. The GOALS section is binding: each one
+names an observable outcome and what it excludes. The APPROACH section is the
+suggested route; deviate from it whenever a goal requires it and report the
+deviation in the work summary.
+
+Successor to the stage loop (0281.7). Landed by hand on local main. Born from
+0011.5's second and third live runs: the loop turned a tractable atomic cutover
+into a six-hour grind — not because the worker or reviewer failed, but because
+the procedure over-built around them. A mistargeted frozen proof the worker
+gamed; a brief that showed one step plus a bare count of the rest, so a worker
+that finished its step had nothing to advance to and re-verified it for hours;
+a work loop that only exited on a whole-stage claim, block, or the 4h guard;
+`sh -c` greps standing in for validation the reviewer should do. This task
+replaces that inner apparatus with one walk over a typed step list.
+
+Scoped to `implement` only (owner ruling 2026-09-07): the new types are
+implement-local; the shared `reviewVerdictSchema`/`blockerStepSchema` and
+core's dormant `frozen_fields_validation` are left untouched until this proves
+out and we spread it. No new core construct — the CDK already has for-each
+(`.ln`/`.forEach`) and `loop`.
+
+## GOALS, binding
+
+1. **The worker walks steps one at a time and never claims the stage.** The
+   current stage's open steps are iterated with for-each; each step is worked
+   by an inner loop until the worker returns `done` or `blocked`; `not-done`
+   continues the same step. Stage completeness is DERIVED — the for-each
+   exhausts (every step done or blocked) and only then does the reviewer run.
+   Excluded: a stage-claim; any worker self-assessment of whole-stage done.
+
+2. **No self-proofing; the reviewer is the only validator.** There is no proof
+   step and no shell gate the worker runs to certify its own work. On
+   exhaustion the reviewer validates the tree with its own tools and either
+   confirms the stage done or revises the step list.
+   Excluded: `proof.run`, and the `proof-command` / `proof-result` slots; any
+   mechanical pass/fail the worker emits about its own output.
+
+3. **A typed per-step return, and a typed unblock.** The worker's output per
+   dispatch is `StepReturn { status: done | blocked | not-done, summary }`. A
+   blocked step is resolved by the reviewer with a typed
+   `BlockerResolution { blocker, decision, approach }` attached to that step,
+   so an unblock always carries its method.
+   Excluded: a free-text "proceed"; a re-brief; the worker inferring the next
+   step; the `remaining` count.
+
+4. **Steps are stable while walked; the list is revised only at the handoff.**
+   No frozen-field enforcement. Stability is structural: the reviewer runs only
+   when the for-each exhausts, and carries done steps forward verbatim — a
+   re-added acceptance is a NEW step, never a silent reopen.
+   Excluded: the `frozen` declaration on implement's step and blocker schemas.
+
+5. **The for-each binds the step; nothing projects it.** The worker's input
+   references the for-each's bound item directly — no brief slot, no carry
+   projection. The reviewer diffs the tree on demand with its own tools.
+   Excluded: the brief projection (`carry.carryBrief`), the `brief` slot, and
+   the `changed-files` slot.
+
+6. **`plan`, not `draft`.** Rename the slot and the steps that produce and read
+   it.
+"""
+scope = """
+## Decisions
+
+- No new core loop primitive. The walk is `openSteps.forEach(step => loop {
+  work } until report.status != "not-done")`, wrapped in the stage loop
+  `until verdict.status == "approved"` with the reviewer between passes. All
+  three constructs already exist in the CDK.
+- Finish-then-review, even if every step ended blocked: `blocked` advances the
+  for-each like `done`, so an all-blocked stage still completes the walk before
+  the reviewer runs.
+- No stuck-detector for a worker that never returns done/blocked: the inner
+  loop is unbounded and the run's total budget is the coarse floor (owner
+  ruling — do not hack a per-step counter).
+- Types are implement-local (own `plan`, `step`, `step-return`,
+  `blocker-resolution`, and verdict shape); the shared toolkit schemas stay as
+  they are for other families.
+- Variants: basic = walk + review; complex = walk + second reviewer; annotate
+  = walk, no gates; quick = walk only, no review (one pass, as the name says).
+
+## Deferred
+
+- notify and commit become typed runtime effects instead of ctx-notify / git
+  shell steps: task 0283.1. Until then, the notify and stage-commit steps stay
+  as they are; this task removes only the proof, brief-projection, and
+  changed-files shell/plumbing (deleted outright, not converted).
+"""
+validation = """
+## Done when
+
+- The implement trait builds (`just ts-build`, `ctx traits build implement`)
+  and checks valid under the landed binary; the deleted apparatus (proof step
+  and slots, `frozen`, `brief` slot + carry, `changed-files`, `remaining`,
+  stage-claim) is absent from the generated canonicals.
+- A live implement run shows: the worker dispatched on one bound step at a
+  time, returning a typed status; the reviewer running only after the for-each
+  exhausts; no proof step; no stage-claim; a blocked step coming back with a
+  typed decision + approach.
+"""
+
+[relations]
+parent = "0281"
+depends-on = ["0281.7"]

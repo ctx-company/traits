@@ -3,38 +3,34 @@ import * as cdk from "@ctx-traits/cdk";
 import { worker } from "../agent.ts";
 import { slot } from "../data.ts";
 
-// The worker's inputs (0281.7): the plan is what to do; the brief is where
-// to do it now — the first open stage, its goal and proof, and the front
-// step with its frozen done-when — copied out of the reviewer's verdict by
-// a deterministic step, so the worker never sees the rest of the queue;
-// its own previous report is its memory of the previous dispatch; the
-// proof result is what the stage's proof command said about its last
-// claim. The conventions (one unit of attention, the stage as the unit of
-// completeness, what a claim means) live in the brief's and the report's
-// field descriptions, which the runtime renders beside the values.
-export const implement = cdk.defineStep.prompt({
-  agent: worker,
-  input: cdk.input.prompt`
-    Implement the plan: ${slot.draft}.
-    Your work now: ${slot.brief}.
-    Your previous report on this stage, if any: ${slot.report.optional()}.
-    What the stage's proof said about your last claim, if you made one: ${slot.proofResult.optional()}.
-  `,
-  output: cdk.output.prompt`
-    Return your report on this dispatch: ${slot.report}
-  `,
-});
+// The worker walks one step at a time (0283). Each dispatch sees the plan, the
+// ONE step the for-each bound, and its own previous return on that step — never
+// the reviewer's list or the rest of the queue. It returns a typed status; the
+// runtime advances on done/blocked and re-dispatches the SAME step on not-done.
+// There is no proof and no stage-claim: the worker never certifies its own
+// work — the reviewer validates the tree.
+export function implement(title: string, step: cdk.SlotHandle): void {
+  worker.prompt(title, {
+    input: cdk.input.prompt`
+      Implement the plan: ${slot.plan}.
+      Your current step — do exactly this and nothing beyond it: ${step}.
+      Your previous return on this step, if any: ${slot.report.optional()}.
+      Return your status for THIS step: done only when you verified the step's done-when holds in the working tree with your own tools; blocked only for something you genuinely cannot resolve from inside this run — a contradiction between the plan and the code, a decision only the owner can make — never difficulty, size, or a red tree; not-done when you made real progress but the done-when does not yet hold, so the next dispatch continues the SAME step. When the step carries a resolution, that is the reviewer's decision and the approach to take — follow it. A red tree is the work, not a reason to stop or to claim done.
+    `,
+    output: slot.report,
+  });
+}
 
-// The unreviewed lane (quick): no verdict and so no brief — the plan's
-// first open stage is the objective, and the worker keeps its own ledger
-// through its report.
-export const implementPlan = cdk.defineStep.prompt({
-  agent: worker,
-  input: cdk.input.prompt`
-    Implement the plan: ${slot.draft}, stage by stage in plan order; each stage's goal is its only requirement and its proof says what green means for it.
-    Your previous report, if any: ${slot.report.optional()}.
-  `,
-  output: cdk.output.prompt`
-    Return your report on this dispatch: ${slot.report}
-  `,
-});
+// The unreviewed lane (quick): no reviewer opens a step list, so the worker
+// implements the plan directly, stage by stage, carrying its own progress
+// through its report until it returns done or blocked.
+export function implementPlan(title: string): void {
+  worker.prompt(title, {
+    input: cdk.input.prompt`
+      Implement the plan: ${slot.plan}, stage by stage in plan order; each stage's goal is its only requirement. There is no reviewer — carry your own progress through your report and keep going until the plan's goals hold.
+      Your previous return, if any: ${slot.report.optional()}.
+      Return your status: done when every stage's goal holds in the tree, verified with your own tools; blocked for something only the owner can settle; not-done when more remains and the next dispatch should continue.
+    `,
+    output: slot.report,
+  });
+}

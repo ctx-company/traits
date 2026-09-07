@@ -16,118 +16,123 @@
   },
   "port:task": {
     "file": ".ctx/traits/authored/implement/source/shared/data.ts",
-    "start": 242,
-    "end": 242
+    "start": 246,
+    "end": 246
   },
   "prompt:draft-the-implementation-plan": {
-    "file": ".ctx/traits/authored/implement/source/shared/step/draft.ts",
+    "file": ".ctx/traits/authored/implement/source/shared/step/plan.ts",
     "start": 13,
     "end": 13
   },
   "prompt:implement-the-plan": {
-    "file": ".ctx/traits/authored/implement/source/variant/quick/index.ts",
-    "start": 13,
-    "end": 13
+    "file": ".ctx/traits/authored/implement/source/shared/step/work.ts",
+    "start": 29,
+    "end": 29
   },
   "prompt:write-the-commit-message": {
     "file": ".ctx/traits/authored/implement/source/variant/quick/index.ts",
-    "start": 17,
-    "end": 17
+    "start": 22,
+    "end": 22
   },
   "resource:task-board": {
     "file": ".ctx/traits/authored/implement/source/shared/resource.ts",
     "start": 3,
     "end": 3
   },
-  "schema:implementation-draft": {
+  "schema:implementation-plan": {
     "file": ".ctx/traits/authored/implement/source/shared/data.ts",
-    "start": 11,
-    "end": 11
+    "start": 79,
+    "end": 79
   },
   "schema:stage": {
     "file": ".ctx/traits/authored/implement/source/shared/data.ts",
-    "start": 19,
-    "end": 19
+    "start": 87,
+    "end": 87
   },
-  "schema:work-report": {
-    "file": "packages/toolkit/src/schema.ts",
-    "start": 362,
-    "end": 362
+  "schema:step-return": {
+    "file": ".ctx/traits/authored/implement/source/shared/data.ts",
+    "start": 56,
+    "end": 56
   },
   "sequence:ctx-branch-arm-p-12-maybe-commit-then/commit-the-work": {
     "file": ".ctx/traits/authored/implement/source/variant/quick/index.ts",
-    "start": 19,
-    "end": 19
+    "start": 24,
+    "end": 24
   },
   "sequence:ctx-branch-arm-p-12-maybe-commit-then/stage-all-changes": {
     "file": ".ctx/traits/authored/implement/source/variant/quick/index.ts",
-    "start": 18,
-    "end": 18
+    "start": 23,
+    "end": 23
   },
   "sequence:ctx-branch-arm-p-12-maybe-commit-then/write-the-commit-message": {
     "file": ".ctx/traits/authored/implement/source/variant/quick/index.ts",
-    "start": 17,
-    "end": 17
+    "start": 22,
+    "end": 22
+  },
+  "sequence:implement-the-plan-body/implement-the-plan": {
+    "file": ".ctx/traits/authored/implement/source/shared/step/work.ts",
+    "start": 28,
+    "end": 28
   },
   "sequence:procedure/check-working-tree-status": {
     "file": ".ctx/traits/authored/implement/source/variant/quick/index.ts",
-    "start": 15,
-    "end": 15
+    "start": 20,
+    "end": 20
   },
   "sequence:procedure/draft-the-implementation-plan": {
-    "file": ".ctx/traits/authored/implement/source/variant/quick/index.ts",
-    "start": 12,
-    "end": 12
-  },
-  "sequence:procedure/implement-the-plan": {
     "file": ".ctx/traits/authored/implement/source/variant/quick/index.ts",
     "start": 13,
     "end": 13
   },
+  "sequence:procedure/implement-the-plan": {
+    "file": ".ctx/traits/authored/implement/source/variant/quick/index.ts",
+    "start": 15,
+    "end": 15
+  },
   "sequence:procedure/maybe-commit": {
     "file": ".ctx/traits/authored/implement/source/variant/quick/index.ts",
-    "start": 16,
-    "end": 16
+    "start": 21,
+    "end": 21
   },
   "slot:commit-log": {
     "file": ".ctx/traits/authored/implement/source/shared/data.ts",
-    "start": 134,
-    "end": 134
+    "start": 153,
+    "end": 153
   },
   "slot:commit-message": {
     "file": ".ctx/traits/authored/implement/source/shared/data.ts",
-    "start": 122,
-    "end": 122
-  },
-  "slot:draft": {
-    "file": ".ctx/traits/authored/implement/source/shared/data.ts",
-    "start": 9,
-    "end": 9
+    "start": 142,
+    "end": 142
   },
   "slot:git-status": {
     "file": ".ctx/traits/authored/implement/source/shared/data.ts",
-    "start": 139,
-    "end": 139
+    "start": 158,
+    "end": 158
   },
   "slot:owner-decisions": {
     "file": ".ctx/traits/authored/implement/source/shared/data.ts",
-    "start": 127,
-    "end": 127
+    "start": 147,
+    "end": 147
+  },
+  "slot:plan": {
+    "file": ".ctx/traits/authored/implement/source/shared/data.ts",
+    "start": 77,
+    "end": 77
   },
   "slot:plan-answer": {
     "file": ".ctx/traits/authored/implement/source/shared/data.ts",
-    "start": 226,
-    "end": 226
+    "start": 230,
+    "end": 230
   },
   "slot:stage-output": {
     "file": ".ctx/traits/authored/implement/source/shared/data.ts",
-    "start": 237,
-    "end": 237
+    "start": 163,
+    "end": 163
   },
   "slot:work-report": {
     "file": ".ctx/traits/authored/implement/source/shared/data.ts",
-    "start": 62,
-    "end": 62
+    "start": 130,
+    "end": 130
   },
   "trait:implement": {
     "file": "[eval1]",

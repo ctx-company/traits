@@ -16,12 +16,12 @@ import * as cdk from "@ctx-traits/cdk";
 import { scribe } from "../agent.ts";
 import {
   annotations,
-  draft,
   gateAnswer,
   gateSurface,
   notifyDigest,
   ownerDecisions,
   ownerGate,
+  plan,
   planAnswer,
   planDigest,
   planGate,
@@ -90,7 +90,7 @@ export function digestPlan(title: string): void {
     id: "plan-digest",
     agent: scribe,
     input: cdk.input.prompt`
-      Digest this drafted plan for the owner's annotation pass: ${draft}.
+      Digest this drafted plan for the owner's annotation pass: ${plan}.
       Follow the output field's own description exactly.
     `,
     output: planDigest,

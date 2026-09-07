@@ -4,111 +4,73 @@ import * as agents from "@ctx-traits/agents";
 import { smart } from "../agent.ts";
 import { slot } from "../data.ts";
 
-// The reviewer grades claims (0281.7): it runs once before any work (the
-// baseline, which opens the ledger and writes the first brief) and then
-// once per claim the stage's proof let through — or once per stage whose
-// time ran out or whose worker reported itself blocked. Its previous
-// verdict is the ledger it carries; the runtime keeps every carried step's
-// done-when from moving. The conventions (what a claim is graded against,
-// what the brief holds, when to summon the owner) live in the verdict
-// schema's own field descriptions, not here.
-const reviewBody = cdk.input.prompt`
-  Review the working tree against the plan ${slot.draft} as source of truth; the task file is what the plan must cover, read it with your tools.
-  The worker's report on its latest dispatch: ${slot.report}. What the stage's proof said about its claim, when it made one: ${slot.proofResult.optional()}. Changed files: ${slot.changedFiles}.
-  Your previous verdict, the ledger you carry forward: ${slot.verdict1.optional()}. The second reviewer's verdict, if any: ${slot.verdict2.optional()}.
-`;
+// The reviewer opens and revises the step list (0283) and is the ONLY
+// validator: it checks the working tree with its own tools, never a proof the
+// worker ran. It rewrites the open-step list only here, at the handoff — never
+// while the worker walks it — so stability is structural, not a frozen field.
+// A step whose done-when it verified is DROPPED (a re-added acceptance is a new
+// step, never a silent reopen); a blocked step gets a typed resolution or is
+// escalated to the owner; the list is emptied only when the task is done.
 
-// The baseline: before any work, the reviewer opens the ledger — every
-// stage of the plan, open unless its goal already holds in the tree — and
-// writes the first brief, so the first dispatch already has one unit of
-// work and the first claim is graded against text that existed before it.
 export const baseline = cdk.defineStep.prompt({
   agent: smart,
   input: cdk.input.prompt`
-    Before any work: review the working tree against the plan ${slot.draft} as source of truth; the task file is what the plan must cover, read it with your tools.
-    Produce the opening verdict: the stage ledger with every stage open unless its goal already holds in the tree, the blockers and steps that stand between the tree and the first open stage's goal (each step with its frozen done-when), and the brief.
-    Owner rulings already made in this run (if any): ${slot.ownerDecisions.optional()} — they are settled; never reopen one.
+    Before any work: read the plan ${slot.plan}, and with your own tools the task file it covers and the current working tree.
+    Open the step list: an ordered list of concrete, actionable steps that, done, satisfy the plan's stages in order. Each step names its stage, ONE operation, and a falsifiable done-when. Front-load the first stage; do not enumerate steps that depend on work not yet done — you extend the list as the work reveals it. A step whose done-when already holds in the tree is not listed. If the plan is not actionable as written — a stage cannot be done as specified — make the earliest step the operation that surfaces or resolves that, so the first pass hits it rather than grinding.
   `,
-  output: cdk.output.prompt`
-    Return the typed review verdict: (${slot.verdict1}).
-  `,
+  output: cdk.output.prompt`Return the open step list: (${slot.steps}).`,
 });
 
-// The tree lane's baseline: the owner's annotations are what the plan must
-// cover, and no owner is reachable during the run.
-export const baselineAnnotated = cdk.defineStep.prompt({
+export const validate = cdk.defineStep.prompt({
   agent: smart,
   input: cdk.input.prompt`
-    Before any work: review the working tree against the plan ${slot.draft} as source of truth; the owner's annotations ${slot.annotations} are what the plan must cover.
-    Produce the opening verdict: the stage ledger with every stage open unless its goal already holds in the tree, the blockers and steps that stand between the tree and the first open stage's goal (each step with its frozen done-when), and the brief.
-    There is no reachable owner during this run — never set escalation to needs-owner. Any question you would have escalated is yours to decide: make the best-effort judgement call, ground it in evidence you verified yourself, and record the decision and its reason in the verdict. A decided question is never a blocker.
+    A for-each pass just walked the open steps (attached as input). Validate the working tree YOURSELF with your own tools against the plan ${slot.plan} — there is no proof, and the worker's word is not evidence. The worker's last return: ${slot.report.optional()}. Owner rulings already made this run: ${slot.ownerDecisions.optional()} — settled, never reopened.
+    Rewrite the open step list for the next pass:
+    - DROP every step whose done-when you verified holds in the tree. Carry none forward; a re-added acceptance is a NEW step.
+    - KEEP a step whose done-when does not yet hold.
+    - For a step the worker could not get past, attach a resolution — the blocker, your decision, and the concrete approach the next dispatch takes — never a bare "proceed". Only when the blocker is something ONLY the owner can settle, leave the step open and raise it to the owner instead of resolving it yourself.
+    - APPEND genuinely new steps the work revealed, in order, prerequisites first; ADVANCE to the next stage's steps once the current stage's goal holds.
+    Leave the list EMPTY only when every stage's goal holds in the tree — an empty list is your confirmation that the task is done.
   `,
+  include: [slot.steps.optional()],
   output: cdk.output.prompt`
-    Return the typed review verdict: (${slot.verdict1}).
-  `,
+    Return the revised open step list: (${slot.steps}).
+  `.extend`Separately: for a blocker only the owner can settle, emit ${agents.needsOwnerSignal}.`,
 });
 
-export const primary = cdk.defineStep.prompt({
-  agent: smart,
-  input: reviewBody
-    .extend`There is no reachable owner during this run — never set escalation to needs-owner. Any question you would have escalated is yours to decide: make the best-effort judgement call, ground it in evidence you verified yourself, and record the decision and its reason in the verdict. A decided question is never a blocker.`,
-  output: cdk.output.prompt`
-    Return the typed review verdict: (${slot.verdict1}).
-  `,
-});
-
-// The tree lane: no task file exists; the owner's annotations are what the
-// plan must cover. No owner is reachable during the run.
-export const primaryAnnotated = cdk.defineStep.prompt({
-  agent: smart,
-  input: cdk.input.prompt`
-    Review the working tree against the plan ${slot.draft} as source of truth; the owner's annotations ${slot.annotations} are what the plan must cover.
-    The worker's report on its latest dispatch: ${slot.report}. What the stage's proof said about its claim, when it made one: ${slot.proofResult.optional()}. Changed files: ${slot.changedFiles}.
-    Your previous verdict, the ledger you carry forward: ${slot.verdict1.optional()}.
-    There is no reachable owner during this run — never set escalation to needs-owner. Any question you would have escalated is yours to decide: make the best-effort judgement call, ground it in evidence you verified yourself, and record the decision and its reason in the verdict. A decided question is never a blocker.
-  `,
-  output: cdk.output.prompt`
-    Return the typed review verdict: (${slot.verdict1}).
-  `,
-});
-
-export const primarySummoning = cdk.defineStep.prompt({
-  agent: smart,
-  input: reviewBody
-    .extend`Owner rulings already made in this run (if any): ${slot.ownerDecisions.optional()} — they are settled; never reopen one. Decide what you can decide yourself and record the decision and its reason in the verdict; a decided question is never a blocker.`,
-  output: cdk.output.prompt`
-    Return the typed review verdict: (${slot.verdict1}).
-  `.extend`Separately: for any contradiction or question only the owner can answer, emit ${agents.needsOwnerSignal}.`,
-});
-
-// The apply pass (0281.1): one interpreter, one artifact. Runs right after
-// an annotated gate and before the next work loop, so the worker only ever
-// sees the applied verdict. The verdict is this step's own output, so it
-// rides in as an optional include and is referenced in prose (the
-// sanctioned self-input form); the vocabulary of what an annotation can do
-// lives in the verdict schema's dispositions field, not here.
 export const apply = cdk.defineStep.prompt({
   agent: smart,
   input: cdk.input.prompt`
-    The owner annotated your verdict at the gate: ${slot.gateAnswer}.
-    Each annotation carries the exact surface text it was made on (raw) and the owner's note (text); the surface was a verbatim copy of the verdict, so raw locates the item.
-    Apply every annotation to your current verdict (attached as input) against the plan ${slot.draft}. Annotations are binding edits, never arguments: where you disagree, apply it and say so in the advisory. The brief follows the applied ledger.
+    The owner annotated the step list at the gate: ${slot.gateAnswer}. Each annotation carries the exact surface text it was made on (raw) and the owner's note (text); the surface was a verbatim copy of the step list, so raw locates the step.
+    Apply every annotation to the open step list attached as input — binding edits, never arguments: reorder, rewrite, add, or drop steps as the notes direct; where you disagree, apply it anyway.
   `,
-  include: [slot.verdict1.optional()],
-  output: cdk.output.prompt`
-    Return the same verdict, edited, with one disposition per annotation: (${slot.verdict1}).
-  `,
+  include: [slot.steps.optional()],
+  output: cdk.output.prompt`Return the edited open step list: (${slot.steps}).`,
 });
 
-export const secondary = cdk.defineStep.prompt({
+// The unattended lanes (complex, annotate): no owner is reachable, so the
+// reviewer decides every blocker itself — attaching a resolution — and never
+// leaves a step open for an owner who will not answer.
+export const validateSolo = cdk.defineStep.prompt({
   agent: smart,
   input: cdk.input.prompt`
-    Review the working tree against the plan ${slot.draft} as source of truth; the task file is what the plan must cover, read it with your tools.
-    The worker's report on its latest dispatch: ${slot.report}. What the stage's proof said about its claim, when it made one: ${slot.proofResult.optional()}. Changed files: ${slot.changedFiles}.
-    The first reviewer's verdict on this same state: ${slot.verdict1.optional()}. Your previous verdict, the ledger you carry forward: ${slot.verdict2.optional()}.
-    There is no reachable owner during this run — never set escalation to needs-owner. Any question you would have escalated is yours to decide: make the best-effort judgement call, ground it in evidence you verified yourself, and record the decision and its reason in the verdict. A decided question is never a blocker.
+    A for-each pass just walked the open steps (attached as input). Validate the working tree YOURSELF with your own tools against the plan ${slot.plan} — there is no proof, and the worker's word is not evidence. The worker's last return: ${slot.report.optional()}.
+    Rewrite the open step list for the next pass: DROP every step whose done-when you verified holds (carry none forward); KEEP a step whose done-when does not yet hold; for a step the worker could not get past, attach a resolution — the blocker, your ruling, and the concrete approach — never a bare "proceed". There is no reachable owner: decide every blocker yourself, ground the call in evidence you verified, and record it in the resolution — never leave a step for the owner. APPEND new steps the work revealed, prerequisites first; ADVANCE to the next stage's steps once the current stage's goal holds.
+    Leave the list EMPTY only when every stage's goal holds in the tree.
   `,
-  output: cdk.output.prompt`
-    Return the typed review verdict — status is revise while any blocker remains, approved when none do (${slot.verdict2})
+  include: [slot.steps.optional()],
+  output: cdk.output.prompt`Return the revised open step list: (${slot.steps}).`,
+});
+
+// The complex lane's second, independent validator: it re-checks the tree
+// itself and has the final say on the list for the next pass — never
+// deferring to the first reviewer's word.
+export const crossValidate = cdk.defineStep.prompt({
+  agent: smart,
+  input: cdk.input.prompt`
+    A second, independent review of the same state. The first reviewer just rewrote the open step list (attached as input). Validate the working tree YOURSELF with your own tools against the plan ${slot.plan} — do not defer to the first reviewer's word. The worker's last return: ${slot.report.optional()}.
+    Return the step list you stand behind for the next pass: DROP steps whose done-when you verified holds; KEEP or resolve the rest with a typed resolution; APPEND anything the first reviewer missed. Leave it EMPTY only when every stage's goal holds in the tree.
   `,
+  include: [slot.steps.optional()],
+  output: cdk.output.prompt`Return the open step list: (${slot.steps}).`,
 });

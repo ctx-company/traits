@@ -1,15 +1,83 @@
 import * as cdk from "@ctx-traits/cdk";
-import * as agents from "@ctx-traits/agents";
 
-// The plan the loop operates on (0281.2). Prose everywhere except `stages`:
-// an ordered list the verdict's stage ledger walks, so the plan survives
-// past round 1. The permissive rule lives in the stages description and
-// nowhere else: a goal is the only requirement of its stage, nothing
-// unstated is a restriction.
-export const draft = cdk.slot({
-  id: "draft",
+// ---------------------------------------------------------------------------
+// The step-walk types (0283), implement-local. The reviewer owns a typed list
+// of open steps; the runtime walks it with for-each; the worker returns a
+// typed per-step status; a blocked step carries the reviewer's typed
+// resolution. No frozen fields, no proof, no stage-claim — the shared
+// toolkit schemas are left untouched for other families until this proves out.
+// ---------------------------------------------------------------------------
+
+/** The reviewer's typed answer to a blocked step — always carries its method. */
+const blockerResolution = cdk.schema.object(
+  "blocker-resolution",
+  {
+    blocker: cdk.schema.field(cdk.schema.text(), {
+      description: "What the worker could not get past, in one sentence — restated from its blocked return.",
+    }),
+    decision: cdk.schema.field(cdk.schema.text(), {
+      description: "The reviewer's ruling that unblocks it: what holds, what to stop trying, which way to go — a decision, not a restatement of the problem.",
+    }),
+    approach: cdk.schema.field(cdk.schema.text(), {
+      description: "The concrete method that follows from the decision: the specific move the next dispatch makes — files, call sites, the shape of the change. Never a bare 'proceed'.",
+    }),
+  },
+  { description: "A blocked step's resolution: the blocker, the reviewer's decision, and the executable approach that follows from it." },
+);
+
+/**
+ * One open step of the current work. The reviewer writes the list; the runtime
+ * walks it; the worker is dispatched on one bound step at a time. `done-when`
+ * is the acceptance the reviewer grades against — NOT frozen: the reviewer
+ * revises the list only at the review handoff, never while the worker walks
+ * it, so stability is structural, not enforced per field.
+ */
+export const stepSchema = cdk.schema.object(
+  "step",
+  {
+    stage: cdk.schema.field(cdk.schema.text(), {
+      description: "The plan stage this step belongs to (its id), so the list keeps the plan's order and grouping.",
+    }),
+    operation: cdk.schema.field(cdk.schema.text(), {
+      description: "One imperative, concrete operation — what to create and what it owns, what to route, what must cease to exist. A destination is not a step; the operation that reaches it is.",
+    }),
+    "done-when": cdk.schema.field(cdk.schema.text(), {
+      description: "The falsifiable acceptance for THIS step: a check the worker can run itself (a grep that must come back empty, a test that must pass, a call site that must route through X) or one precise observable sentence. What it does not ask for is not asked here; more is a NEW step.",
+    }),
+    resolution: cdk.schema.field(blockerResolution, {
+      required: false,
+      description: "Present only when a prior pass returned this step blocked and the reviewer resolved it: the decision + approach the next dispatch works from. Absent for a fresh step.",
+    }),
+  },
+  { description: "One open step: its stage, the operation, the acceptance it is graded against, and the reviewer's resolution when it was previously blocked." },
+);
+
+/** The worker's typed return for one dispatch on one step. */
+export const stepReturnSchema = cdk.schema.object(
+  "step-return",
+  {
+    status: cdk.schema.field(cdk.schema.enum(["done", "blocked", "not-done"] as const), {
+      description: "done when you verified this step's done-when holds in the tree with your own tools; blocked when you cannot proceed on it from inside this run (a real contradiction, a decision only the owner can make) — never difficulty or a red tree; not-done when you made progress but it does not yet hold, and the next dispatch should continue the SAME step. Claim only what you verified: a false 'done' comes back as the same open step.",
+    }),
+    summary: cdk.schema.field(cdk.schema.text(), {
+      description: "What this dispatch changed and verified — files and symbols, commands run and their observed results. When status is blocked, state precisely what blocks it and why. The next dispatch reads this as its only memory of this one.",
+    }),
+  },
+  { description: "The worker's report on one dispatch of one step: its status and what it did." },
+);
+
+// ---------------------------------------------------------------------------
+// Core slots
+// ---------------------------------------------------------------------------
+
+// The plan the loop operates on. Stages carry a goal only — the mechanical
+// `proof` is gone (the reviewer validates, nothing self-proofs), and there is
+// no per-stage commit flag (v1 commits progress whenever the tree is dirty;
+// per-stage-semantic commit lands with the commit effect in 0283.1).
+export const plan = cdk.slot({
+  id: "plan",
   schema: cdk.schema.object(
-    "implementation-draft",
+    "implementation-plan",
     {
       scope: cdk.schema.field(cdk.schema.text(), {
         description: "The task's scope restated from the task file: what is in, what is explicitly out.",
@@ -23,128 +91,88 @@ export const draft = cdk.slot({
                 description: 'Short kebab-case slug naming the stage, stable for the whole run (e.g. "resolver", "flip-context", "delete-old").',
               }),
               goal: cdk.schema.field(cdk.schema.text(), {
-                description:
-                  "What must be observable when this stage is done, taken from the task's Done-when. A goal is the only requirement of its stage.",
-              }),
-              proof: cdk.schema.field(cdk.schema.text(), {
-                description:
-                  "The mechanical floor of the stage: one shell command line (sh -c) that exits 0 exactly when the stage's observable requirements that a command can check hold — a compile, named test suites, greps that must come back empty, a gate script — run from the repository root by the runtime whenever the worker claims the stage complete. It is what green means for THIS stage and nothing more: a stage in the middle of a cutover whose tree cannot compile until later stages names only greps; the stage where the tree compiles again names the build. Everything a command cannot check (semantics, design, plan conformance) is the reviewer's, graded against the goal. The literal 'none' when nothing mechanical applies; such a stage's claims go straight to review.",
-              }),
-              commit: cdk.schema.field(cdk.schema.boolean(), {
-                description:
-                  "Whether the tree is committed when this stage is done: true where the tree is in a state that may be committed (it compiles and its proof passed), false inside a dark window where old and new cannot coexist yet. The atomic-stage rule of the task: commit only where the whole tree compiles.",
+                description: "What must be observable when this stage is done, taken from the task's Done-when. A goal is the only requirement of its stage.",
               }),
             },
-            { description: "One stage of the plan: an id, the goal that defines it, its mechanical proof, and whether it commits." },
+            { description: "One stage of the plan: an id and the goal that defines it." },
           ),
         ),
         {
           description:
-            "The plan as an ordered list of stages, each an id and a goal. Nothing else is required of a stage while it is open: whatever a later stage's goal covers may be in any state until that stage, and that is neither a defect nor a regression. Restrictions exist only as goals; anything unstated is allowed. A done stage's goal must keep holding, and a standing property (a safety invariant, a contract) is the goal of the stage that establishes it — nothing more is needed to keep it. The stage is the unit of completeness: the reviewer grades the stage, never a round, and a round is one attempt at finishing the current stage — the worker attempts the whole stage and, when it cannot finish, reports what is left. A cutover is stages, not a cliff: its last stages are the deletion and the green gates. Together the stages must cover every Done-when goal of the task.",
+            "The plan as an ordered list of stages, each an id and a goal. Nothing else is required of a stage while it is open: whatever a later stage's goal covers may be in any state until that stage, and that is neither a defect nor a regression. The plan must be ACTIONABLE for this run — a stage that cannot be done as written is a plan error, surfaced as blocked steps and revised, never ground against. When the task declares itself an atomic cutover that only compiles as one unit, honor that: do not carve it into stages that each demand a green intermediate. Together the stages must cover every Done-when goal of the task.",
         },
       ),
       approach: cdk.schema.field(cdk.schema.text(), {
-        description:
-          "The suggested route: files to touch, symbols, edit order, reuse opportunities, validation plan. Guidance the worker may deviate from in service of a goal, reporting the deviation in the work summary.",
+        description: "The suggested route: files to touch, symbols, edit order, reuse opportunities. Guidance the worker may deviate from in service of a goal, reporting the deviation.",
       }),
       risks: cdk.schema.field(cdk.schema.text(), {
         description: "What could go wrong and how the route mitigates it.",
       }),
     },
-    { description: "smart-1's implementation plan for the task — what the loop operates on. A plan, not an implementation." },
+    { description: "smart's implementation plan for the task — an actionable plan, not an implementation." },
   ),
-  description: "smart-1's implementation plan for the task — the plan the worker implements and the verdict's stage ledger walks.",
+  description: "The implementation plan the reviewer turns into open steps and the worker implements.",
 });
 
-// The worker's typed report (0281.7): the loop reads `claim` and `blocked`,
-// the reviewer reads the summary beside the diff, and the next dispatch
-// reads the whole thing as its only memory of the previous one.
+// The current OPEN steps of the work, the reviewer's sole loop output. The
+// runtime walks this with for-each; empty means the task is done (derived
+// completeness — no stage-claim). The reviewer carries done steps out of the
+// list, keeps or resolves blocked ones, and appends new findings.
+export const steps = cdk.slot({
+  id: "steps",
+  schema: cdk.schema.list(stepSchema),
+  description: "The open steps the worker still has to do, in order, written by the reviewer. The for-each walks it; an empty list means the reviewer found nothing open — the task is done.",
+});
+
+// The worker's typed per-dispatch return. The inner work loop reads `status`
+// to decide same-step-again vs advance; the next dispatch on the same step
+// reads the whole thing as its only memory.
 export const report = cdk.slot({
   id: "work-report",
-  schema: agents.workReportSchema,
-  description:
-    "The worker's report on its latest dispatch: what changed and was verified, whether it claims the stage complete, what the next dispatch does first, and what blocks it.",
-});
-
-// The brief (0281.7): the one part of the verdict the worker sees, carried
-// out of the verdict by a deterministic project step — no model in between.
-export const brief = cdk.slot({
-  id: "brief",
-  schema: agents.briefSchema,
-  description:
-    "The worker's next unit of work, copied from the reviewer's verdict: the first open stage with its goal, proof and commit flag, and the front step with its frozen done-when. This is the whole of what the verdict asks of the worker right now; the rest of the ledger is the reviewer's.",
-});
-
-// The stage a verdict just closed, carried out of the verdict for the
-// stage-commit tail: the scribe names it in the commit message.
-export const closedStage = cdk.slot({
-  id: "closed-stage",
-  schema: agents.closedStageSchema,
-  description: "The stage the latest verdict flipped to done, copied from the verdict: its id and whether the plan commits on it.",
-});
-
-export const proofCommand = cdk.slot.text({
-  id: "proof-command",
-  description: "The current stage's proof command, copied from the brief for the proof step's argv.",
-});
-
-export const proofResult = cdk.slot.text({
-  id: "proof-result",
-  description:
-    "What the stage's proof command said about the worker's latest claim: the literal 'pass', or 'fail' with the exit code and the tail of the command's output. Written only when the worker claimed the stage complete; a claim that failed proof comes back to the worker with this text and costs no review. A 'pass' is the mechanical floor — necessary, not sufficient: it means the command's checks held, never that the stage goal is met. Whether the stage is actually done is the reviewer's call, and a rejected claim comes back through the brief's last-claim even when this reads 'pass'.",
-});
-
-export const changedFiles = cdk.slot.text({
-  id: "changed-files",
-  description:
-    "Names and change-kinds of every file changed since the session base — an index of where the work landed, never the work itself. The reviewer opens whatever it needs with its own tools.",
-  hint: "git diff --name-status against slot:diff-base; covers committed and uncommitted changes, omits untracked files.",
+  schema: stepReturnSchema,
+  description: "The worker's return on its latest dispatch: the step's status and what the dispatch did.",
 });
 
 export const diffBase = cdk.slot.text({
   id: "diff-base",
-  description: "Commit the session started from — the fixed base every changed-files capture diffs against.",
-  hint: "git rev-parse HEAD captured before any work; worker commits during the loop never move it.",
-});
-
-export const verdict1 = cdk.slot({
-  id: "review-verdict-1",
-  schema: agents.reviewVerdictSchema,
-  description: "First reviewer's verdict for the current work state.",
-});
-
-export const verdict2 = cdk.slot({
-  id: "review-verdict-2",
-  schema: agents.reviewVerdictSchema,
-  description: "Second, independent reviewer's verdict for the current work state.",
+  description: "Commit the session started from — a fixed anchor the reviewer can diff against with its own tools.",
+  hint: "git rev-parse HEAD captured before any work; commits during the loop never move it.",
 });
 
 export const commitMessage = cdk.slot.text({
   id: "commit-message",
-  description: "Commit message for the completed task; injected directly into the git commit command step.",
+  description: "Commit message for the current progress commit; injected directly into the git commit command step.",
 });
 
 export const ownerDecisions = cdk.slot.texts({
   id: "owner-decisions",
-  description:
-    "Every owner ruling made during this run — one formatted entry per summons, one gate answer per annotated verdict — the run's durable decision record, carried into the commit message. Annotations reach the seats through the verdict the reviewer applied them to, not through this record.",
-  hint: "One entry per ruling: a summons entry is the question and the owner's answer in one or two sentences; a gate entry is the ctx-annotate decision JSON verbatim.",
+  description: "Every owner ruling made during this run — one entry per summons — the run's durable decision record, carried into the commit message.",
+  hint: "One entry per ruling: the question put to the owner and the owner's answer in one or two sentences.",
 });
 
 export const commitLog = cdk.slot.text({
   id: "commit-log",
-  description: "Throwaway capture of the commit command's own output — not a run output port, never gates anything.",
+  description: "Throwaway capture of the commit command's own output — never gates anything.",
 });
 
 export const gitStatus = cdk.slot.text({
   id: "git-status",
-  description: "Working-tree status captured immediately before the commit tail: git status --porcelain output verbatim.",
+  description: "Working-tree status captured before the commit tail: git status --porcelain output verbatim.",
 });
+
+export const stageOutput = cdk.slot.text({
+  id: "stage-output",
+  description: "Output evidence from the git add command step.",
+});
+
+// ---------------------------------------------------------------------------
+// Owner-notification slots (notify stays a command chain in 0283; it becomes a
+// typed effect in 0283.1). The digest is re-keyed to the step list.
+// ---------------------------------------------------------------------------
 
 export const notifyId = cdk.slot.text({
   id: "notify-id",
-  description:
-    "The owner-notification activity id, exactly as `begin` printed it — every later notification step addresses this.",
+  description: "The owner-notification activity id, exactly as `begin` printed it — every later notification step addresses this.",
 });
 
 export const notifyDigest = cdk.slot({
@@ -153,64 +181,43 @@ export const notifyDigest = cdk.slot({
     "notify-digest",
     {
       badge: cdk.schema.field(cdk.schema.text(), {
-        description:
-          'Short status badge for the activity, 64 characters at most, always "review: <verdict status>".',
+        description: 'Short status badge, 64 characters at most: "review: <N> open" while steps remain, or "review: done" when the step list is empty.',
       }),
       summary: cdk.schema.field(cdk.schema.text(), {
-        description:
-          'Multi-line prose block for the owner\'s phone, 4096 characters at most: the verdict in two to four plain sentences — how many blocker steps are open, what closed this round, and where the run is heading. NEVER the empty string (an empty value aborts the command it feeds): when the verdict is approved, exactly "approved — all points closed".',
+        description: 'Two to four plain sentences for the owner\'s phone: how many steps are open, what closed this pass, whether any step is blocked, and where the run is heading. NEVER the empty string — when the list is empty, exactly "done — no steps open".',
       }),
       journal: cdk.schema.field(cdk.schema.text(), {
-        description:
-          'Exactly "stage <k>/<n> \u2022 claim <c> \u2022 <X> open \u2022 <Y> closed" and NOTHING else \u2014 k is the 1-based position of the first open stage in the verdict\'s stage ledger (n when every stage is done), n the number of stages; c is "accepted" when the verdict carries a closed-stage, "rejected" when the work report claimed complete and the verdict carries no closed-stage, "blocked" when the work report\'s blocked field is non-empty, and "none" otherwise (the report was in-progress: the stage\'s time ran out without a claim); X counts steps with status "open" and Y counts steps with status "done" or "dropped", across every blocker in the verdict. When the verdict carries no stage ledger, exactly "claim <c> \u2022 <X> open \u2022 <Y> closed". No step texts, no prose, no punctuation beyond the bullets.',
+        description: 'Exactly "steps: <O> open • <B> blocked" and NOTHING else — O counts open steps in the list, B counts steps carrying a resolution (previously blocked). No prose, no step text.',
       }),
       surface: cdk.schema.field(cdk.schema.text(), {
-        description:
-          "The owner's annotation surface. The verdict status on the first line, then one line 'CLAIM: <claim>' from the work report, with its blocked text appended after ' — ' when non-empty. Then, when the verdict carries a stage ledger, one line per stage under 'STAGES:' as '<id> (<status>): <evidence>' with its ruling when present, in ledger order. Then every blocker and every step COPIED VERBATIM — never paraphrased, shortened, or reordered — as plain numbered lines, one step per line, blockers separated by a blank line and introduced by 'BLOCKER n (stage, status):'; each step line carries the step text, then 'done-when: ' and its done-when VERBATIM, then its status, then its explanation VERBATIM, then its guidance when present, then its ruling when present, separated by ' — '. After the blockers: the advisory VERBATIM under a line reading 'ADVISORY:', then — when the verdict carries dispositions — one line per disposition under 'RULINGS APPLIED:', each as '<action> — <applied-to> — <note>'. This text is what the owner annotates, and each annotation comes back carrying the exact text it was made on, so fidelity to the verdict is the only requirement.",
+        description: "The owner's annotation surface: one line 'STEPS: <O> open' then every open step COPIED VERBATIM as numbered plain lines — 'n. [<stage>] <operation> — done-when: <done-when>', with ' — resolution: <decision>' appended when the step carries one. Fidelity to the step list is the only requirement; each annotation returns carrying the exact text it was made on.",
       }),
     },
-    { description: "The reviewer verdict digested for the owner notification thread." },
+    { description: "The step list digested for the owner notification thread." },
   ),
-  description: "Scribe's per-round digest of the review verdict, fed directly into the notification commands.",
+  description: "Scribe's per-pass digest of the step list, fed directly into the notification commands.",
 });
 
-export const notifyBadge = cdk.slot.text({
-  id: "notify-badge",
-  description: "The digest's badge field, carried as text for command argv.",
-});
+export const notifyBadge = cdk.slot.text({ id: "notify-badge", description: "The digest's badge field, carried as text for command argv." });
+export const notifySummary = cdk.slot.text({ id: "notify-summary", description: "The digest's summary field, carried as text for command argv." });
+export const notifyJournal = cdk.slot.text({ id: "notify-journal", description: "The digest's journal field, carried as text for command argv." });
+export const notifyLog = cdk.slot.text({ id: "notify-log", description: "The notifier's own JSON receipt for the most recent notification command." });
 
-export const notifySummary = cdk.slot.text({
-  id: "notify-summary",
-  description: "The digest's summary field, carried as text for command argv.",
-});
-
-export const notifyJournal = cdk.slot.text({
-  id: "notify-journal",
-  description: "The digest's journal field, carried as text for command argv.",
-});
-
-export const gateSurface = cdk.slot.text({
-  id: "gate-surface",
-  description: "The digest's annotation surface, carried as text for the gate command.",
-});
+export const gateSurface = cdk.slot.text({ id: "gate-surface", description: "The digest's annotation surface, carried as text for the gate command." });
 
 export const gateAnswer = cdk.slot.text({
   id: "gate-answer",
-  description:
-    "The owner's verdict-gate outcome: the literal 'accepted' when the owner had no annotations (or the gate is off); otherwise the ctx-annotate decision JSON. Each of its annotations carries `raw` — the exact surface text the owner annotated, an exact substring of the verdict — and `text`, the owner's note. Annotations are binding edits to the verdict: the reviewer applies them and accounts for each in the verdict's dispositions.",
+  description: "The owner's verdict-gate outcome: the literal 'accepted' when the owner had no annotations (or the gate is off); otherwise the ctx-annotate decision JSON. Each annotation carries `raw` (the exact surface text annotated) and `text` (the note). Annotations are binding edits to the step list: the reviewer applies them on the next pass.",
 });
 
-// The plan gate (0281.3): the same gate shape as the verdict gate, pointed
-// at the drafted plan before round 1, so the plan is corrected at round 0
-// for free instead of at round 3 for money.
+// The plan gate (unchanged): the plan is corrected at round 0 before any work.
 export const planDigest = cdk.slot({
   id: "plan-digest",
   schema: cdk.schema.object(
     "plan-digest",
     {
       surface: cdk.schema.field(cdk.schema.text(), {
-        description:
-          "The owner's plan surface: the plan COPIED VERBATIM — never paraphrased, shortened, or reordered — as plain numbered lines: 'SCOPE:' then the scope text; 'STAGES:' then one line per stage as '<id>: <goal>' in plan order; 'APPROACH:' then the approach text; 'RISKS:' then the risks text. This text is what the owner annotates, and each annotation comes back carrying the exact text it was made on, so fidelity to the plan is the only requirement.",
+        description: "The owner's plan surface: the plan COPIED VERBATIM as plain numbered lines: 'SCOPE:' then the scope; 'STAGES:' then one line per stage as '<id>: <goal>' in order; 'APPROACH:' then the approach; 'RISKS:' then the risks.",
       }),
     },
     { description: "The drafted plan digested for the owner's annotation pass." },
@@ -218,26 +225,23 @@ export const planDigest = cdk.slot({
   description: "Scribe's digest of the drafted plan into the owner's annotation surface.",
 });
 
-export const planSurface = cdk.slot.text({
-  id: "plan-surface",
-  description: "The plan digest's surface, carried as text for the gate command.",
-});
+export const planSurface = cdk.slot.text({ id: "plan-surface", description: "The plan digest's surface, carried as text for the gate command." });
 
 export const planAnswer = cdk.slot.text({
   id: "plan-answer",
-  description:
-    "The owner's plan-gate outcome: the literal 'accepted' when the owner had no annotations (or the gate is off); otherwise the ctx-annotate decision JSON. Each of its annotations carries `raw` — the exact plan text the owner annotated — and `text`, the owner's note. Annotations are binding corrections: the plan is drafted again with them as input until the owner accepts it.",
+  description: "The owner's plan-gate outcome: the literal 'accepted' when the owner had no annotations (or the gate is off); otherwise the ctx-annotate decision JSON. Annotations are binding corrections: the plan is drafted again with them until accepted.",
 });
 
-export const notifyLog = cdk.slot.text({
-  id: "notify-log",
-  description: "The notifier's own JSON receipt for the most recent notification command.",
+// The tree lane (implement:annotate): the owner's annotations over the working
+// tree are the task. No task port, no plan gate, no verdict gate.
+export const annotations = cdk.slot.text({
+  id: "annotations",
+  description: "The owner's annotations from ctx-annotate's tree view over the run's working tree: the decision JSON. In the tree lane this is the task — what to change and where. The literal 'none' when the owner closed the tree without annotating.",
 });
 
-export const stageOutput = cdk.slot.text({
-  id: "stage-output",
-  description: "Output evidence from the git add command step.",
-});
+// ---------------------------------------------------------------------------
+// Ports
+// ---------------------------------------------------------------------------
 
 export const task = cdk.port.input.text({
   id: "task",
@@ -246,33 +250,21 @@ export const task = cdk.port.input.text({
 
 export const ownerRuling = cdk.port.input.text({
   id: "owner-ruling",
-  description:
-    "Owner summons transport: 'on' (default) parks the run on reviewer-raised owner questions; 'off' skips the summons branch entirely for unattended runs — escalations stay recorded in the verdict for morning review, the run proceeds.",
+  description: "Owner summons transport: 'on' (default) parks the run on reviewer-raised owner questions; 'off' skips the summons branch for unattended runs — escalations stay in the step's resolution for morning review.",
   optional: true,
   default: { value: "on" },
 });
 
 export const ownerGate = cdk.port.input.text({
   id: "owner-gate",
-  description:
-    "Owner annotation transport for review verdicts: 'annotate' (default) pipes each verdict's surface to ctx-annotate so the owner can accept, overrule, or extend it; 'off' auto-accepts for unattended runs.",
+  description: "Owner annotation transport for the step list: 'annotate' (default) pipes each pass's surface to ctx-annotate; 'off' auto-accepts for unattended runs.",
   optional: true,
   default: { value: "annotate" },
 });
 
-// The tree lane (implement:annotate): the owner's annotations over the
-// working tree are the task. No task port, no plan gate, no verdict gate —
-// ctx-annotate is used once, at the start.
-export const annotations = cdk.slot.text({
-  id: "annotations",
-  description:
-    "The owner's annotations from ctx-annotate's tree view over the run's working tree: the decision JSON, each entry naming a file, its lines, the exact annotated text (raw) and the owner's note (text). In the tree lane this is the task — what to change and where — and the plan's goals are cut from it. The literal 'none' when the owner closed the tree without annotating.",
-});
-
 export const planGate = cdk.port.input.text({
   id: "plan-gate",
-  description:
-    "Owner annotation transport for the drafted plan before round 1: 'annotate' (default) pipes the plan's surface to ctx-annotate so the owner can accept it or correct it, and the plan is redrafted with the corrections until accepted; 'off' auto-accepts for unattended runs.",
+  description: "Owner annotation transport for the drafted plan before any work: 'annotate' (default) pipes the plan surface to ctx-annotate and redrafts with corrections until accepted; 'off' auto-accepts for unattended runs.",
   optional: true,
   default: { value: "annotate" },
 });
@@ -280,16 +272,10 @@ export const planGate = cdk.port.input.text({
 export const port = { task, ownerGate, ownerRuling, planGate };
 
 export const slot = {
-  draft,
+  plan,
+  steps,
   report,
-  brief,
-  closedStage,
-  proofCommand,
-  proofResult,
-  changedFiles,
   diffBase,
-  verdict1,
-  verdict2,
   commitMessage,
   ownerDecisions,
   gitStatus,

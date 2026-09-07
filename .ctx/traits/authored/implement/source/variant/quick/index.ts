@@ -1,16 +1,21 @@
 import * as cdk from "@ctx-traits/cdk";
 import * as shared from "#trait/shared/index.ts";
 
-// The unreviewed lane: one plan, one dispatch, one commit. No verdict, so
-// no brief — the worker works the plan stage by stage on its own.
+// The unreviewed lane: one plan, one walk, one commit. No reviewer, so no step
+// list — the worker implements the plan directly, dispatch after dispatch,
+// until it returns done or blocked. One pass, as the name says.
 export default function () {
   cdk.defineVariant("Quick", {
-    description: "Unreviewed implementation: plan, implement, commit.",
+    description: "Unreviewed implementation: plan, implement to done, commit.",
     metadata: { tag: shared.metadata.tag },
   });
 
-  shared.step.draft.compose("Draft the implementation plan");
-  shared.step.work.implementPlan("Implement the plan");
+  shared.step.plan.compose("Draft the implementation plan");
+
+  cdk.flow.loop("Implement the plan", (work) => {
+    shared.step.work.implementPlan("Implement the plan");
+    work.untilAll([cdk.condition.not(cdk.condition.fieldEquals(shared.data.report, "status", "not-done"))]);
+  });
 
   shared.step.git.status("Check working tree status");
   cdk.flow.when("Maybe Commit", cdk.condition.notEmpty(shared.step.git.status.output), () => {

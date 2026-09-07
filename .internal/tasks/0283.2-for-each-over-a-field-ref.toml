@@ -1,0 +1,55 @@
+schema-version = "0.2"
+key = "0283.2"
+title = "For-each over a field ref, so a seat can emit one typed object and the loop walks its list field"
+status = "ready"
+raised = "2026-09-07"
+content = """
+Deferred follow-on to 0283 (the step-walk). Today `.forEach`/`.ln` resolves a
+top-level list SLOT and materializes item handles from it; there is no way to
+walk a nested list FIELD of another slot. That forced a modeling choice in
+0283: the reviewer writes the open steps as their own `steps` slot rather than
+as one cohesive `verdict { status, steps, advisory }` object, because the
+for-each could not walk `verdict.steps`. It works, but the data model is shaped
+by a plumbing constraint instead of the domain.
+
+This task lets for-each's `over` accept a field ref (a RefHandle into a slot's
+list field), so a seat can emit one typed verdict object and the loop walks
+`verdict.steps` — everything (status, notify digest, gate surface, apply) then
+reads from the one object, type-driven, no artificial slot split.
+
+## GOALS, binding
+
+1. **`over` accepts a field ref.** `list-field-of-an-object-slot.forEach(...)`
+   (or `sequence.forEach({ over: <ref> })`) walks that nested list, binding one
+   item at a time, exactly as it does for a top-level list slot.
+   Excluded: changing the semantics of the top-level-slot for-each that exists.
+
+2. **Item materialization and replay work over the nested list.** The bound
+   item handle is materialized from the field path; the for-each frame's cursor
+   over the nested list is recorded in the ledger and replays deterministically.
+
+3. **Adopt it in implement, collapse `steps` into the verdict.** Once landed,
+   implement's reviewer emits one `verdict` object and the walk runs over
+   `verdict.steps`; the standalone `steps` slot is removed.
+"""
+scope = """
+## Decisions
+
+- Design the field-ref resolution once in core/cdk, generically; adopt in
+  implement, do not spread until proven (same staging rule as 0283 / 0283.1).
+- Touches: the for-each `over` resolution and item-handle materialization,
+  the cdk surface (`.forEach` on a ref or a `sequence.forEach` fields form),
+  and the for-each frame's ledger recording / replay over a nested list.
+"""
+validation = """
+## Done when
+
+- A trait can `<objectSlot>.<listField>.forEach(...)` (or the fields form) and
+  it walks the nested list, binding items and replaying deterministically.
+- implement's reviewer emits one verdict object; the walk runs over its steps
+  field; the standalone `steps` slot is gone; the trait builds and checks.
+"""
+
+[relations]
+parent = "0283"
+depends-on = ["0283"]

@@ -18,9 +18,8 @@ import {
   notifyJournal,
   notifyLog,
   notifySummary,
-  report,
+  steps,
   task,
-  verdict1,
 } from "../data.ts";
 
 export function begin(title: string): void {
@@ -44,8 +43,7 @@ export function reviewUpdate(title: string): void {
     id: "notify-digest-verdict",
     agent: scribe,
     input: cdk.input.prompt`
-      Digest this review verdict for the owner's phone: ${verdict1}.
-      The worker's report the verdict graded: ${report}.
+      Digest the open step list for the owner's phone: ${steps}.
       Follow each output field's own description exactly; the fields feed
       notification commands verbatim.
     `,

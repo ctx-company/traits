@@ -2,7 +2,7 @@ id = "implement"
 schema-version = "0.6"
 version = "0.26.0"
 name = "Quick"
-description = "Unreviewed implementation: plan, implement, commit."
+description = "Unreviewed implementation: plan, implement to done, commit."
 variant = "quick"
 
 [metadata]
@@ -56,33 +56,33 @@ description = 'Task to implement, named by its file in .internal/tasks/ — the 
 [[slot]]
 id = "commit-log"
 schema = "schema:text"
-description = "Throwaway capture of the commit command's own output — not a run output port, never gates anything."
+description = "Throwaway capture of the commit command's own output — never gates anything."
 
 [[slot]]
 id = "commit-message"
 schema = "schema:text"
-description = "Commit message for the completed task; injected directly into the git commit command step."
-
-[[slot]]
-id = "draft"
-schema = "schema:implementation-draft"
-description = "smart-1's implementation plan for the task — the plan the worker implements and the verdict's stage ledger walks."
+description = "Commit message for the current progress commit; injected directly into the git commit command step."
 
 [[slot]]
 id = "git-status"
 schema = "schema:text"
-description = "Working-tree status captured immediately before the commit tail: git status --porcelain output verbatim."
+description = "Working-tree status captured before the commit tail: git status --porcelain output verbatim."
 
 [[slot]]
 id = "owner-decisions"
 schema = "[schema:text]"
-description = "Every owner ruling made during this run — one formatted entry per summons, one gate answer per annotated verdict — the run's durable decision record, carried into the commit message. Annotations reach the seats through the verdict the reviewer applied them to, not through this record."
-hint = "One entry per ruling: a summons entry is the question and the owner's answer in one or two sentences; a gate entry is the ctx-annotate decision JSON verbatim."
+description = "Every owner ruling made during this run — one entry per summons — the run's durable decision record, carried into the commit message."
+hint = "One entry per ruling: the question put to the owner and the owner's answer in one or two sentences."
+
+[[slot]]
+id = "plan"
+schema = "schema:implementation-plan"
+description = "The implementation plan the reviewer turns into open steps and the worker implements."
 
 [[slot]]
 id = "plan-answer"
 schema = "schema:text"
-description = "The owner's plan-gate outcome: the literal 'accepted' when the owner had no annotations (or the gate is off); otherwise the ctx-annotate decision JSON. Each of its annotations carries `raw` — the exact plan text the owner annotated — and `text`, the owner's note. Annotations are binding corrections: the plan is drafted again with them as input until the owner accepts it."
+description = "The owner's plan-gate outcome: the literal 'accepted' when the owner had no annotations (or the gate is off); otherwise the ctx-annotate decision JSON. Annotations are binding corrections: the plan is drafted again with them until accepted."
 
 [[slot]]
 id = "stage-output"
@@ -91,8 +91,8 @@ description = "Output evidence from the git add command step."
 
 [[slot]]
 id = "work-report"
-schema = "schema:work-report"
-description = "The worker's report on its latest dispatch: what changed and was verified, whether it claims the stage complete, what the next dispatch does first, and what blocks it."
+schema = "schema:step-return"
+description = "The worker's return on its latest dispatch: the step's status and what the dispatch did."
 
 [[resource]]
 id = "task-board"
@@ -102,13 +102,13 @@ hint = "Repo-root directory for the task board."
 trigger = "on-demand"
 
 [[schema]]
-id = "implementation-draft"
-description = "smart-1's implementation plan for the task — what the loop operates on. A plan, not an implementation."
+id = "implementation-plan"
+description = "smart's implementation plan for the task — an actionable plan, not an implementation."
 
 [schema.fields.approach]
 schema = "schema:text"
 required = true
-description = "The suggested route: files to touch, symbols, edit order, reuse opportunities, validation plan. Guidance the worker may deviate from in service of a goal, reporting the deviation in the work summary."
+description = "The suggested route: files to touch, symbols, edit order, reuse opportunities. Guidance the worker may deviate from in service of a goal, reporting the deviation."
 
 [schema.fields.risks]
 schema = "schema:text"
@@ -123,16 +123,11 @@ description = "The task's scope restated from the task file: what is in, what is
 [schema.fields.stages]
 schema = "[schema:stage]"
 required = true
-description = "The plan as an ordered list of stages, each an id and a goal. Nothing else is required of a stage while it is open: whatever a later stage's goal covers may be in any state until that stage, and that is neither a defect nor a regression. Restrictions exist only as goals; anything unstated is allowed. A done stage's goal must keep holding, and a standing property (a safety invariant, a contract) is the goal of the stage that establishes it — nothing more is needed to keep it. The stage is the unit of completeness: the reviewer grades the stage, never a round, and a round is one attempt at finishing the current stage — the worker attempts the whole stage and, when it cannot finish, reports what is left. A cutover is stages, not a cliff: its last stages are the deletion and the green gates. Together the stages must cover every Done-when goal of the task."
+description = "The plan as an ordered list of stages, each an id and a goal. Nothing else is required of a stage while it is open: whatever a later stage's goal covers may be in any state until that stage, and that is neither a defect nor a regression. The plan must be ACTIONABLE for this run — a stage that cannot be done as written is a plan error, surfaced as blocked steps and revised, never ground against. When the task declares itself an atomic cutover that only compiles as one unit, honor that: do not carve it into stages that each demand a green intermediate. Together the stages must cover every Done-when goal of the task."
 
 [[schema]]
 id = "stage"
-description = "One stage of the plan: an id, the goal that defines it, its mechanical proof, and whether it commits."
-
-[schema.fields.commit]
-schema = "schema:boolean"
-required = true
-description = "Whether the tree is committed when this stage is done: true where the tree is in a state that may be committed (it compiles and its proof passed), false inside a dark window where old and new cannot coexist yet. The atomic-stage rule of the task: commit only where the whole tree compiles."
+description = "One stage of the plan: an id and the goal that defines it."
 
 [schema.fields.goal]
 schema = "schema:text"
@@ -144,38 +139,24 @@ schema = "schema:text"
 required = true
 description = 'Short kebab-case slug naming the stage, stable for the whole run (e.g. "resolver", "flip-context", "delete-old").'
 
-[schema.fields.proof]
-schema = "schema:text"
-required = true
-description = "The mechanical floor of the stage: one shell command line (sh -c) that exits 0 exactly when the stage's observable requirements that a command can check hold — a compile, named test suites, greps that must come back empty, a gate script — run from the repository root by the runtime whenever the worker claims the stage complete. It is what green means for THIS stage and nothing more: a stage in the middle of a cutover whose tree cannot compile until later stages names only greps; the stage where the tree compiles again names the build. Everything a command cannot check (semantics, design, plan conformance) is the reviewer's, graded against the goal. The literal 'none' when nothing mechanical applies; such a stage's claims go straight to review."
-
 [[schema]]
-id = "work-report"
-description = "The worker's report on one dispatch: what changed and was verified, whether the stage is claimed complete, what the next dispatch does first, and what blocks the work."
+id = "step-return"
+description = "The worker's report on one dispatch of one step: its status and what it did."
 
-[schema.fields.blocked]
+[schema.fields.status]
 schema = "schema:text"
 required = true
-description = "The one thing you cannot resolve from inside this run — a contradiction between the plan and the code, a decision only the owner can make, a missing credential — in one or two sentences; the empty string when nothing blocks you. A non-empty value ends the work loop early and goes to the reviewer, who answers it or puts it to the owner. Never difficulty, size, or a red tree: those are the work."
-
-[schema.fields.claim]
-schema = "schema:text"
-required = true
-description = "complete when you verified with your own tools that the stage goal in your brief holds in the working tree: the runtime then runs the stage's proof and, when it passes, the reviewer grades the claim. in-progress when the goal does not yet hold: the next dispatch continues from your report, and nothing is graded. A red tree is not a reason to stop or to claim — the brief's proof says what green means for this stage. Claim only what you verified: a false claim costs a proof run and a review and comes back as the same open step."
+description = "done when you verified this step's done-when holds in the tree with your own tools; blocked when you cannot proceed on it from inside this run (a real contradiction, a decision only the owner can make) — never difficulty or a red tree; not-done when you made progress but it does not yet hold, and the next dispatch should continue the SAME step. Claim only what you verified: a false 'done' comes back as the same open step."
 allowed = [
-    "complete",
-    "in-progress",
+    "done",
+    "blocked",
+    "not-done",
 ]
-
-[schema.fields.next]
-schema = "schema:text"
-required = true
-description = "For the next dispatch: what to do first, in one or two sentences — the handoff note that lets a fresh dispatch continue instead of re-deriving. The empty string when the claim is complete."
 
 [schema.fields.summary]
 schema = "schema:text"
 required = true
-description = "What this dispatch changed and what it verified: files and symbols, commands run and their observed results, deviations from the plan's approach and why. The reviewer reads this beside the diff; the next dispatch reads it as its only memory of this one."
+description = "What this dispatch changed and verified — files and symbols, commands run and their observed results. When status is blocked, state precisely what blocks it and why. The next dispatch reads this as its only memory of this one."
 
 [[agent]]
 id = "scribe"
@@ -212,18 +193,17 @@ id = "review-before-final"
 
 [prompt.draft-the-implementation-plan]
 text = """
-Draft the implementation plan for {port:task}, read it and the relevant code with your tools.
+Draft the implementation plan for {port:task}; read it and the relevant code with your tools.
 The owner's corrections to the previous draft, when present, are binding: {slot:plan-answer}"""
 input = ["port:task"]
-output = ["slot:draft"]
+output = ["slot:plan"]
 
 [prompt.implement-the-plan]
 text = """
-Implement the plan: {slot:draft}, stage by stage in plan order; each stage's goal is its only requirement and its proof says what green means for it.
-Your previous report, if any: {slot:work-report}.
-
-Return your report on this dispatch: slot:work-report"""
-input = ["slot:draft"]
+Implement the plan: {slot:plan}, stage by stage in plan order; each stage's goal is its only requirement. There is no reviewer — carry your own progress through your report and keep going until the plan's goals hold.
+Your previous return, if any: {slot:work-report}.
+Return your status: done when every stage's goal holds in the tree, verified with your own tools; blocked for something only the owner can settle; not-done when more remains and the next dispatch should continue."""
+input = ["slot:plan"]
 output = ["slot:work-report"]
 
 [prompt.write-the-commit-message]
@@ -275,8 +255,19 @@ argv = [
     "{slot:commit-message}",
 ]
 
+[[sequence.implement-the-plan-body.sequence]]
+id = "implement-the-plan"
+title = "Implement the plan"
+agent = "agent:worker"
+prompt = "prompt:implement-the-plan"
+input = [
+    "slot:plan",
+    { slot = "slot:work-report", optional = true },
+]
+output = ["slot:work-report"]
+
 [procedure]
-description = "Unreviewed implementation: plan, implement, commit."
+description = "Unreviewed implementation: plan, implement to done, commit."
 input = ["port:task"]
 
 [[procedure.sequence]]
@@ -288,18 +279,20 @@ input = [
     "port:task",
     { slot = "slot:plan-answer", optional = true },
 ]
-output = ["slot:draft"]
+output = ["slot:plan"]
 
 [[procedure.sequence]]
 id = "implement-the-plan"
 title = "Implement the plan"
-agent = "agent:worker"
-prompt = "prompt:implement-the-plan"
-input = [
-    "slot:draft",
-    { slot = "slot:work-report", optional = true },
-]
-output = ["slot:work-report"]
+kind = "loop"
+sequence = "sequence:implement-the-plan-body"
+
+[[procedure.sequence.until.all]]
+
+[procedure.sequence.until.all.not]
+slot = "slot:work-report"
+field = "status"
+equals = "not-done"
 
 [[procedure.sequence]]
 id = "check-working-tree-status"
