@@ -6,23 +6,23 @@ generated-at = "not-recorded"
 [[trait]]
 id = "review"
 variant = "default"
-requested-version = "0.3.1"
-resolved-version = "0.3.1"
+requested-version = "0.3.2"
+resolved-version = "0.3.2"
 
 [trait.digests]
-source = "sha256:34cd88a9b2cb9b7a33b37b35c5b8065c150d60685af99fbab8525ebb96f39f11"
-canonical = "sha256:a39d46d9aa9ee15265a6982c20e6de7654599ea866a28b54f368fef75ec4e344"
+source = "sha256:1935e3b9a1ab7b268d72595780b99d6691c974d6f2923d1862fdc8be0dfad130"
+canonical = "sha256:cfa041803a288229d6fb1608da764e89ed8a28a73231913397c96b54edcb159b"
 model-visible = "sha256:3f5d03a51a47aa407319fdcaaf522ff0b083cde95d09ec656494a564edc791a7"
 resource-manifest = "sha256:355cf9c76d5b62fdbeaf7cb842541dbdc760245189aff6f4d743afad5716f1cb"
 
 [[trait]]
 id = "review"
 variant = "pr"
-requested-version = "0.3.1"
-resolved-version = "0.3.1"
+requested-version = "0.3.2"
+resolved-version = "0.3.2"
 
 [trait.digests]
-source = "sha256:c2c46292e66c7bab24f0be913975ea11d9cdf4a3e97447f4027ded006ec77c73"
-canonical = "sha256:767b94bc64c6b7b0afc6637266df6c9970c8b73b4ff0b09cbc68135681b1d440"
-model-visible = "sha256:c88462dadf536a7c716f2167181a7824b2bed695d471ee380a797a3b1f1aad6c"
+source = "sha256:14c0e5ae577964f1f5f8ebfa7d9b47f50a12946cec210545df901316eb9eddd7"
+canonical = "sha256:e32fcd2fff6f67b403cb79266704847f2f43fee5b204140cd62945cc650aa57f"
+model-visible = "sha256:6867a0594da26f413fbc15be1ae7b84d520efe64d0fe82045d219acdb82bdbee"
 resource-manifest = "sha256:355cf9c76d5b62fdbeaf7cb842541dbdc760245189aff6f4d743afad5716f1cb"

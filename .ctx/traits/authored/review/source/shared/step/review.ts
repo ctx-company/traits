@@ -17,12 +17,13 @@ export const reviewDocument = slot.text({
   description: "Rendered human review document for the range, written by the same reviewer step.",
 });
 
-// The pr variant's findings. A finding is a defect verified in the changed
-// region: code whose behavior is wrong for some caller, input or state, shown
-// by a failure path that ends in an observable wrong outcome. The list is what
-// the code has, the verdict is what to do about it. Two seats touch it: the
-// reviewer generates candidates, the verifier keeps the ones that meet the bar.
-// Every convention lives in the field descriptions, not the prompts.
+// The pr variant's findings. A finding is a slip verified in the changed
+// region: code its own author would not defend once it is pointed out, wrong
+// for some input, state or call path whether or not anything breaks today.
+// A decision the author could defend is not a finding. The list is what the
+// code has, the verdict is what to do about it. Two seats touch it: the
+// reviewer generates candidates, the verifier keeps the slips. Every
+// convention lives in the field descriptions, not the prompts.
 export const findingSchema = schema.object(
   "review-finding",
   {
@@ -36,22 +37,22 @@ export const findingSchema = schema.object(
     }),
     severity: schema.field(schema.enum(["low", "medium", "high", "critical"] as const), {
       description:
-        "Impact if merged as is, never confidence: critical breaks or exposes something for every caller; high is a real defect on a main path; medium a real defect on a narrower path, or a correctness gap with a bounded blast radius; low a real defect with little practical impact.",
+        "Impact if merged as is, never confidence: critical breaks or exposes something for every caller; high is a real defect on a main path; medium a real defect on a narrower path, or a correctness gap with a bounded blast radius; low a real defect with little practical impact today.",
     }),
     category: schema.field(schema.enum(["bug", "security", "concurrency", "data", "api", "perf", "doc_defect"] as const), {
       description:
-        "The kind of defect: bug (wrong behavior or result), security (a boundary crossed or crossable), concurrency (races, locking, ordering), data (loss, corruption, wrong persistence or keys), api (a contract or interface misused or broken so a caller gets the wrong thing), perf (a measured cost on a path the range introduced), doc_defect (text a user or caller relies on that is wrong: a message, an error string, a documented contract).",
+        "The kind of defect: bug (wrong behavior or result), security (a boundary crossed or crossable), concurrency (races, locking, ordering), data (loss, corruption, wrong persistence or keys), api (a contract or interface misused or broken so a caller gets the wrong thing), perf (a cost the range introduced on a path where it matters), doc_defect (text a user or caller relies on that is wrong: a message, an error string, a documented contract).",
     }),
     what: schema.field(schema.text(), {
       description:
-        "The defect and its observable wrong outcome in one to three sentences that stand alone without the diff: what the code does, for which caller, input or state, and what goes wrong: a wrong value or result, a crash or hang, lost or corrupted data, a boundary crossed, a user-visible wrong text, or a measured cost. A statement that is merely true about the code (a test that is missing, a comment that disagrees with the code, an extra round trip, a file nothing references) is not a defect and does not belong here.",
+        "The defect and its consequence in one to three sentences that stand alone without the diff: what the code does, what it should do, and what goes wrong or would go wrong for a caller, input or state. A finding is a slip: code its own author would not defend once it is pointed out, such as the wrong variable passed, a zero treated as absent, a dict-order assumption, an incomplete locking pattern, a value stored on the error path, an event recorded before the check that gates it. It is listed whether or not anything breaks today. A decision the author could defend, such as a cache policy, a timeout, a type or naming choice, an extra round trip, a comment, or test coverage, is not a finding and belongs in the review document.",
     }),
     evidence: schema.field(schema.text(), {
       description:
-        "The failure path that makes the defect observable: the triggering input or state, the call path from an entry point, caller or test that actually reaches the lines, and the wrong outcome at the end of it, with the offending lines quoted verbatim. A description of what was read is not evidence; a defect whose failure path cannot be stated is a suspicion and belongs in the review document.",
+        "The offending lines quoted verbatim, and the input, state or call path under which the code is wrong, from code the reviewer opened. Whether a current caller triggers it is not required; that the code is wrong for that input is. A suspicion not confirmed in the code belongs in the review document.",
     }),
   },
-  { description: "One defect verified in the changed region, with the failure path that makes it observable." },
+  { description: "One slip verified in the changed region, with the input, state or call path under which the code is wrong." },
 );
 
 export const findingsSchema = schema.object(
@@ -59,7 +60,7 @@ export const findingsSchema = schema.object(
   {
     findings: schema.field(schema.list(findingSchema), {
       description:
-        "Every defect verified in the changed region, one entry per underlying issue, listed whether or not it blocks the merge and whether or not the code was already wrong before the range: a defect of any severity may sit beside an approved verdict, and the verdict never removes an entry from this list. Not findings: merge-gate judgments (over-build, duplication, taste, scope), missing tests or coverage, comments that disagree with the code, extra work with no measured effect, files nothing references, notes about the reviewing environment, and suspicions not confirmed in the code; those belong in the review document. Empty when the changed region has no verified defect.",
+        "Every slip verified in the changed region, one entry per underlying issue, listed whether or not it blocks the merge, whether or not the code was already wrong before the range, and whether or not anything breaks today: a slip of any severity may sit beside an approved verdict, and the verdict never removes an entry from this list. Not findings: decisions the author could defend (over-build, duplication, taste, scope, cache or timeout policy, type or naming choices, extra work, unreferenced files), missing tests or coverage, comments that disagree with the code, notes about the reviewing environment, and suspicions not confirmed in the code; those belong in the review document. Empty when the changed region has no verified slip.",
     }),
   },
   { description: "A typed findings list for the range: what the code has, independent of what to do about it." },
@@ -69,14 +70,14 @@ export const candidateFindings = slot({
   id: "candidate-findings",
   schema: findingsSchema,
   description:
-    "The reviewer's candidate findings, written by the same step as the verdict and the document. Candidates, not the result: the verifier decides which of them are findings.",
+    "The reviewer's candidate findings, written by the same step as the verdict and the document. Candidates, not the result: the verifier decides which of them are findings, so list every slip seen rather than pre-filtering.",
 });
 
 export const findings = slot({
   id: "findings",
   schema: findingsSchema,
   description:
-    "The final findings for the range, written by the verifier: the confirmed candidates verbatim, in candidate order, each with its evidence replaced by the failure path the verifier restated from the code. Nothing the verifier did not confirm appears here.",
+    "The final findings for the range, written by the verifier: the confirmed candidates verbatim, in candidate order, each with its evidence replaced by what the verifier restated from the code. Nothing the verifier did not confirm appears here.",
 });
 
 export const verificationSchema = schema.object(
@@ -92,11 +93,11 @@ export const verificationSchema = schema.object(
             }),
             disposition: schema.field(schema.enum(["confirmed", "refuted", "unverifiable"] as const), {
               description:
-                "confirmed only when both hold: the verifier restated the failure path from code it opened itself (the triggering input or state, a caller, entry point or test that actually reaches the lines, and the wrong outcome), and that outcome is a defect under the finding definition (a wrong value or result, a crash or hang, lost or corrupted data, a boundary crossed, a user-visible wrong text, a measured cost). That a candidate's statements are true is never enough: a missing test, a comment that disagrees with the code, an extra round trip with no measured effect, or an unreferenced file is refuted as not a defect even when every word of it is accurate. refuted also when the code shows the failure cannot occur, naming the line that prevents it or the caller that never passes the triggering input. unverifiable when deciding would need a runtime, data or service the verifier cannot see; never used as a soft confirm.",
+                "confirmed when the verifier, reading the code itself, agrees the code is wrong for the input, state or call path the candidate names, whether or not any current caller triggers it: a slip its author would not defend once shown. Latent is never a reason to refute. refuted when the code prevents the failure (naming the line), when the named input or state cannot reach the lines by construction (naming why), or when the candidate is a decision rather than a slip (a cache or timeout policy, a type or naming choice, extra work, a comment, test coverage, an unreferenced file), naming which. unverifiable when deciding would need a runtime, data or service the verifier cannot see; never used as a soft confirm.",
             }),
             "failure-path": schema.field(schema.text(), {
               description:
-                "The failure path as restated from the code, with the lines quoted, ending in the wrong outcome; required for confirmed. For refuted, the line or fact that blocks the failure, or the sentence naming why the candidate is not a defect. Empty only for unverifiable.",
+                "For confirmed: the input, state or call path under which the code is wrong, restated from code the verifier opened, with the lines quoted. For refuted: the line that prevents the failure, or the sentence naming the decision. Empty only for unverifiable.",
             }),
             note: schema.field(schema.text(), {
               description: "One sentence for the human: why this disposition, in the verifier's own words.",
@@ -144,7 +145,7 @@ const reviewPrText = input.prompt(
     No task board governs this run: leave "wall-id" the empty string, omit "remaining" and "owner-items", and set "escalation" to "needs-owner" only for authority questions the diff itself raises, never for ordinary code-review blockers.
     Edit nothing — you are read-only. Open files, do not write them.
     ${CODE_INTEGRITY_DOCTRINE}
-    Write the typed verdict, the candidate findings, and a rendered human review document: what the range does, each candidate and why it carries its severity, which of them block the merge and why, and anything advisory. A second seat verifies the candidates afterwards; list what you found, it decides what stands.`,
+    Write the typed verdict, the candidate findings, and a rendered human review document: what the range does, each candidate and why it carries its severity, which of them block the merge and why, and anything advisory. A second seat verifies the candidates afterwards; list every slip you found, it decides what stands.`,
   { range, commitLog, diffStat },
 );
 
@@ -159,7 +160,7 @@ export const verify = cdk.defineStep.prompt({
   input: cdk.input.prompt`
     Verify the candidate findings ${candidateFindings} against the range ${range}.
     Open the code yourself — "git show", "git diff ${range} -- <file>", grep for callers and tests — the candidates' own evidence is a claim to check, never something to copy.
-    A candidate stands only as a defect: a failure path you restated from the code that ends in a wrong observable outcome for some caller, input or state. True is not enough.
+    A candidate stands when it is a slip: code its author would not defend once shown, wrong for some input, state or call path whether or not anything breaks today. A decision the author could defend is refuted.
     Edit nothing — you are read-only.
     Return the verification record and the final findings list.
   `,

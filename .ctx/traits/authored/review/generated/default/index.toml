@@ -1,6 +1,6 @@
 id = "review"
 schema-version = "0.5"
-version = "0.3.1"
+version = "0.3.2"
 name = "Review (Default)"
 description = "Deterministic evidence capture (diff --stat, log --oneline) -> single reviewer pass -> read-only assertion."
 summary = "Points a single reviewer at a git range and returns a typed verdict plus a rendered review document, with zero mutation of the reviewed tree."
